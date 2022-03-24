@@ -1,1 +1,1 @@
-[![PostHog](https://repository-images.githubusercontent.com/235901813/a3b8679b-748a-4903-9570-9f303197ed77)](http://posthog.com/)
+[![PostHog](https://user-images.githubusercontent.com/154479/159967966-f4733e29-0972-4261-81a3-1ff737029fc7.png)](https://posthog.com)
