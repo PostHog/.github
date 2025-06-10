@@ -165,6 +165,7 @@ jobs:
                           statusOptionId = process.env.IN_PROGRESS_OPTION_ID;
                           statusName = 'In Progress';
                       } else {
+                          core.info(`PR #${prNumber} is not a draft. Checking reviewers...`);
                           // Only check reviewers if PR is not in draft
                           const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
                               owner,
@@ -172,22 +173,27 @@ jobs:
                               pull_number: prNumber
                           });
 
-                          const isTeamRequested = reviewers?.team_reviewers?.some(t => t.slug === teamSlug) ?? false;
+                          const isTeamRequested = reviewers?.teams?.some(t => t.slug === teamSlug) ?? false;
+                          if (isTeamRequested) {
+                              core.info(`'${teamSlug}' is requested as a reviewer`);
+                          }
+                          else {
+                              core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team.`);
+                          }
                           
-                          // Check if any user reviewer is a team member
+                          // Get all team members in one call
                           let isMemberRequested = false;
-                          if (reviewers?.users) {
-                              for (const user of reviewers.users) {
-                                  try {
-                                      await github.rest.teams.getMembershipForUserInOrg({
-                                          org: owner,
-                                          team_slug: teamSlug,
-                                          username: user.login
-                                      });
-                                      isMemberRequested = true;
-                                      break;
-                                  } catch {}
-                              }
+                          if (reviewers?.users?.length > 0) {
+                              const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
+                                  org: owner,
+                                  team_slug: teamSlug,
+                                  per_page: 100  // Team size is small, 100 is more than enough
+                              });
+                              
+                              // Check if any reviewer is in the team members list
+                              isMemberRequested = reviewers.users.some(reviewer => 
+                                  teamMembers.some(member => member.login === reviewer.login)
+                              );
                           }
 
                           if (isTeamRequested || isMemberRequested) {
