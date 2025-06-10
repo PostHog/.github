@@ -73,7 +73,7 @@ jobs:
                       });
                       
                       core.setOutput('node_id', pr.node_id);
-                      core.setOutput('is_draft', pr.draft);
+                      core.setOutput('is_draft', pr.draft); // Outputs are always strings.
 
             - name: Determine PR status and desired project status
               id: check
@@ -93,10 +93,11 @@ jobs:
                       let isDraft;
                       let nodeId;
                       
+                      // Convert is_draft to boolean once at the start
                       if (context.eventName === 'pull_request') {
                           // Handle direct PR event
                           pr = context.payload.pull_request;
-                          isDraft = pr.draft;
+                          isDraft = pr.draft;  // pr.draft is already a boolean from the GitHub API
                           nodeId = pr.node_id;
                       } else if (context.eventName === 'workflow_dispatch') {
                           // Handle manual dispatch
@@ -107,7 +108,7 @@ jobs:
                           });
                           pr = prResponse.data;
                           nodeId = steps.get-pr.outputs.node_id;
-                          isDraft = steps.get-pr.outputs.is_draft === 'true';
+                          isDraft = steps.get-pr.outputs.is_draft === 'true';  // Convert string output to boolean
                       } else if (context.eventName === 'workflow_call') {
                           // Handle workflow call
                           const query = `
@@ -144,7 +145,7 @@ jobs:
                           
                           pr = prResponse.data;
                           nodeId = context.payload.inputs.pr_node_id;
-                          isDraft = context.payload.inputs.is_draft === 'true';
+                          isDraft = context.payload.inputs.is_draft;  // Boolean from the calling workflow's inputs
                       } else {
                           throw new Error(`Unsupported event type: ${context.eventName}`);
                       }
