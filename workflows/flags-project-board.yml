@@ -1,0 +1,359 @@
+# This workflow manages pull requests in the Feature Flags Project board.
+# When a member of the team specified by TEAM_SLUG is added as a reviewer to a PR, the workflow will:
+# - Add the PR to the project board
+# - Set the status of the PR to 'In Review'
+# When a PR is converted to draft mode, the workflow will:
+# - Set the status of the PR to 'In Progress'
+# When a PR is marked ready for review, the workflow will:
+# - Set the status of the PR to 'In Review'
+#
+# Required permissions:
+# - POSTHOG_BOT_GITHUB_TOKEN with:
+#   - repo scope (for PR operations)
+#   - project scope (for project board operations)
+#   - read:org scope (for team membership checks)
+
+name: Add PR to Feature Flags Project
+
+# The IDs below require using the GraphQL API to get them.
+env:
+    PROJECT_V2_ID: PVT_kwDOA5iQ-M4AroCF             # Feature Flags Project
+    STATUS_FIELD_ID: PVTSSF_lADOA5iQ-M4AroCFzgirkuw # Status Field for Feature Flags Project
+    IN_REVIEW_OPTION_ID: 8d24d43c                   # Status: In Review
+    IN_PROGRESS_OPTION_ID: f75ad846                 # Status: In Progress
+    ORG_NAME: PostHog
+    TEAM_SLUG: team-feature-flags
+
+on:
+    workflow_call:
+        inputs:
+            pr_number:
+                description: 'The number of the pull request'
+                required: true
+                type: number
+            pr_node_id:
+                description: 'The node ID of the pull request'
+                required: true
+                type: string
+            is_draft:
+                description: 'Whether the pull request is in draft mode'
+                required: true
+                type: boolean
+    workflow_dispatch:
+        inputs:
+            pr_number:
+                description: 'The number of the pull request'
+                required: true
+                type: number
+            repository:
+                description: 'The repository name (e.g. todo-app)'
+                required: true
+                type: string
+
+jobs:
+    add-to-project-board:
+        runs-on: ubuntu-latest
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.event_name == 'pull_request'
+        steps:
+            - name: Get PR Node ID for workflow_dispatch
+              id: get-pr
+              if: github.event_name == 'workflow_dispatch'
+              uses: actions/github-script@v6
+              with:
+                  github-token: ${{ secrets.POSTHOG_BOT_GITHUB_TOKEN }}
+                  script: |
+                      const prNumber = ${{ github.event.inputs.pr_number }};
+                      const repo = '${{ github.event.inputs.repository }}';
+                      const owner = process.env.ORG_NAME;
+                      
+                      const { data: pr } = await github.rest.pulls.get({
+                          owner,
+                          repo,
+                          pull_number: prNumber
+                      });
+                      
+                      core.setOutput('node_id', pr.node_id);
+                      core.setOutput('is_draft', pr.draft); // Outputs are always strings.
+
+            - name: Determine PR status and desired project status
+              id: check
+              uses: actions/github-script@v6
+              env:
+                  IN_REVIEW_OPTION_ID: '${{ env.IN_REVIEW_OPTION_ID }}'
+                  IN_PROGRESS_OPTION_ID: '${{ env.IN_PROGRESS_OPTION_ID }}'
+                  ORG_NAME: '${{ env.ORG_NAME }}'
+                  TEAM_SLUG: '${{ env.TEAM_SLUG }}'
+              with:
+                  github-token: ${{ secrets.POSTHOG_BOT_GITHUB_TOKEN }}
+                  script: |
+                      // Debug logging
+                      core.info('Event type: ' + context.eventName);
+                      
+                      let pr;
+                      let isDraft;
+                      let nodeId;
+                      
+                      // Convert is_draft to boolean once at the start
+                      if (context.eventName === 'pull_request') {
+                          // Handle direct PR event
+                          pr = context.payload.pull_request;
+                          isDraft = pr.draft;  // pr.draft is already a boolean from the GitHub API
+                          nodeId = pr.node_id;
+                      } else if (context.eventName === 'workflow_dispatch') {
+                          // Handle manual dispatch
+                          const prResponse = await github.rest.pulls.get({
+                              owner: process.env.ORG_NAME,
+                              repo: context.payload.inputs.repository,
+                              pull_number: context.payload.inputs.pr_number
+                          });
+                          pr = prResponse.data;
+                          nodeId = steps.get-pr.outputs.node_id;
+                          isDraft = steps.get-pr.outputs.is_draft === 'true';  // Convert string output to boolean
+                      } else if (context.eventName === 'workflow_call') {
+                          // Handle workflow call
+                          const query = `
+                            query($nodeId: ID!) {
+                              node(id: $nodeId) {
+                                ... on PullRequest {
+                                  id
+                                  number
+                                  isDraft
+                                  repository {
+                                    nameWithOwner
+                                  }
+                                }
+                              }
+                            }
+                          `;
+                          
+                          const result = await github.graphql(query, { nodeId: context.payload.inputs.pr_node_id });
+                          const prData = result.node;
+                          
+                          if (!prData) {
+                              throw new Error(`Could not find PR with node ID: ${context.payload.inputs.pr_node_id}`);
+                          }
+                          
+                          // Extract repository name from nameWithOwner (format: "owner/repo")
+                          const [owner, repo] = prData.repository.nameWithOwner.split('/');
+                          
+                          // Get full PR details
+                          const prResponse = await github.rest.pulls.get({
+                              owner,
+                              repo,
+                              pull_number: prData.number
+                          });
+                          
+                          pr = prResponse.data;
+                          nodeId = context.payload.inputs.pr_node_id;
+                          isDraft = context.payload.inputs.is_draft;  // Boolean from the calling workflow's inputs
+                      } else {
+                          throw new Error(`Unsupported event type: ${context.eventName}`);
+                      }
+                      
+                      const owner = process.env.ORG_NAME;
+                      const repo = pr.base.repo.name;
+                      const prNumber = pr.number;
+                      const teamSlug = process.env.TEAM_SLUG;
+
+                      core.info(`Evaluating PR #${prNumber} (draft: ${isDraft})`);
+
+                      let statusOptionId = null;
+                      let statusName = '';
+
+                      if (isDraft) {
+                          core.info(`PR #${prNumber} is a draft. Setting status to 'In Progress'.`);
+                          statusOptionId = process.env.IN_PROGRESS_OPTION_ID;
+                          statusName = 'In Progress';
+                      } else {
+                          // Only check reviewers if PR is not in draft
+                          const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
+                              owner,
+                              repo,
+                              pull_number: prNumber
+                          });
+
+                          const isTeamRequested = reviewers?.team_reviewers?.some(t => t.slug === teamSlug) ?? false;
+                          
+                          // Check if any user reviewer is a team member
+                          let isMemberRequested = false;
+                          if (reviewers?.users) {
+                              for (const user of reviewers.users) {
+                                  try {
+                                      await github.rest.teams.getMembershipForUserInOrg({
+                                          org: owner,
+                                          team_slug: teamSlug,
+                                          username: user.login
+                                      });
+                                      isMemberRequested = true;
+                                      break;
+                                  } catch {}
+                              }
+                          }
+
+                          if (isTeamRequested || isMemberRequested) {
+                              core.info(`PR #${prNumber} is ready and has a reviewer from team '${teamSlug}'. Setting status to 'In Review'.`);
+                              statusOptionId = process.env.IN_REVIEW_OPTION_ID;
+                              statusName = 'In Review';
+                          } else {
+                              core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
+                          }
+                      }
+
+                      const shouldAdd = statusOptionId !== null;
+                      core.setOutput('should_add', shouldAdd.toString());
+                      core.setOutput('pr_node_id', nodeId);
+                      core.setOutput('status_option_id', statusOptionId ?? '');
+            - name: Update Project Board
+              if: steps.check.outputs.should_add == 'true'
+              uses: actions/github-script@v6
+              env:
+                  PROJECT_V2_ID: ${{ env.PROJECT_V2_ID }}
+                  STATUS_FIELD_ID: ${{ env.STATUS_FIELD_ID }}
+                  PR_NODE_ID: ${{ steps.check.outputs.pr_node_id }}
+                  STATUS_OPTION_ID: ${{ steps.check.outputs.status_option_id }}
+              with:
+                  github-token: ${{ secrets.POSTHOG_BOT_GITHUB_TOKEN }}
+                  script: |
+                      const projectId = process.env.PROJECT_V2_ID;
+                      const fieldId = process.env.STATUS_FIELD_ID;
+                      const optionId = process.env.STATUS_OPTION_ID;
+                      const contentId = process.env.PR_NODE_ID;
+
+                      // Get project details
+                      const projectQuery = `
+                        query($projectId: ID!) {
+                          node(id: $projectId) {
+                            ... on ProjectV2 {
+                              title
+                              fields(first: 10) {
+                                nodes {
+                                  ... on ProjectV2SingleSelectField {
+                                    id
+                                    name
+                                    options {
+                                      id
+                                      name
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      `;
+
+                      const projectResult = await github.graphql(projectQuery, { projectId });
+                      const project = projectResult.node;
+                      const statusField = project.fields.nodes.find(f => f.id === fieldId);
+                      
+                      if (!statusField) {
+                          throw new Error(`Could not find status field with ID ${fieldId} in project '${project.title}'. Please check the STATUS_FIELD_ID environment variable.`);
+                      }
+                      
+                      const statusOption = statusField.options.find(o => o.id === optionId);
+                      
+                      if (!statusOption) {
+                          throw new Error(`Could not find status option with ID ${optionId} in field '${statusField.name}'. Please check the status option IDs in the environment variables.`);
+                      }
+
+                      core.info(`Checking if PR is already in project '${project.title}'...`);
+
+                      let existingItemId = null;
+                      let existingPR = null;
+
+                      // First, get the PR details using the node ID
+                      const prQuery = `
+                        query($nodeId: ID!) {
+                          node(id: $nodeId) {
+                            ... on PullRequest {
+                              id
+                              number
+                              title
+                            }
+                          }
+                        }
+                      `;
+                      
+                      const prResult = await github.graphql(prQuery, { nodeId: contentId });
+                      const prData = prResult.node;
+                      
+                      if (!prData) {
+                          throw new Error(`Could not find PR with node ID: ${contentId}`);
+                      }
+
+                      core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'...`);
+
+                      const query = `
+                        query($projectId: ID!) {
+                          node(id: $projectId) {
+                            ... on ProjectV2 {
+                              items(first: 100) { # Limit is sufficient for our team size
+                                nodes {
+                                  id
+                                  content {
+                                    ... on PullRequest { 
+                                      id
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      `;
+
+                      const result = await github.graphql(query, { projectId });
+                      const items = result.node.items.nodes;
+
+                      for (const item of items) {
+                          if (item.content?.id === contentId) {
+                              existingItemId = item.id;
+                              break;
+                          }
+                      }
+
+                      if (existingItemId) {
+                          core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'...`);
+                      } else {
+                          core.info(`Adding PR #${prData.number} (${prData.title}) to project '${project.title}'...`);
+                          const addItemMutation = `
+                            mutation($projectId: ID!, $contentId: ID!) {
+                              addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                                item { 
+                                  id
+                                }
+                              }
+                            }
+                          `;
+
+                          const response = await github.graphql(addItemMutation, { projectId, contentId });
+                          existingItemId = response.addProjectV2ItemById.item.id;
+                          core.info(`Added PR #${prData.number} (${prData.title}) to project '${project.title}'.`);
+                      }
+
+                      const updateStatusMutation = `
+                        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                          updateProjectV2ItemFieldValue(input: {
+                            projectId: $projectId,
+                            itemId: $itemId,
+                            fieldId: $fieldId,
+                            value: { singleSelectOptionId: $optionId }
+                          }) {
+                            projectV2Item { 
+                              id
+                            }
+                          }
+                        }
+                      `;
+
+                      try {
+                          await github.graphql(updateStatusMutation, {
+                              projectId,
+                              itemId: existingItemId,
+                              fieldId,
+                              optionId
+                          });
+                          core.info(`Updated PR #${prData.number} (${prData.title}) status to '${statusOption.name}' in project '${project.title}'.`);
+                      } catch (error) {
+                          core.setFailed(`Failed to update PR #${prData.number} (${prData.title}) status: ${error.message}`);
+                      }
