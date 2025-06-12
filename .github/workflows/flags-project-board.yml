@@ -72,8 +72,10 @@ jobs:
                           pull_number: prNumber
                       });
                       
+                      // Store the full PR data as a JSON string in the output
+                      core.setOutput('pr_data', JSON.stringify(pr));
                       core.setOutput('node_id', pr.node_id);
-                      core.setOutput('is_draft', pr.draft); // Outputs are always strings.
+                      core.setOutput('is_draft', pr.draft.toString());
 
             - name: Determine PR status and desired project status
               id: check
@@ -101,14 +103,10 @@ jobs:
                           nodeId = pr.node_id;
                       } else if (context.eventName === 'workflow_dispatch') {
                           // Handle manual dispatch
-                          const prResponse = await github.rest.pulls.get({
-                              owner: process.env.ORG_NAME,
-                              repo: context.payload.inputs.repository,
-                              pull_number: context.payload.inputs.pr_number
-                          });
-                          pr = prResponse.data;
-                          nodeId = steps.get-pr.outputs.node_id;
-                          isDraft = steps.get-pr.outputs.is_draft === 'true';  // Convert string output to boolean
+                          const prData = JSON.parse('${{ steps.get-pr.outputs.pr_data }}');
+                          pr = prData;
+                          nodeId = '${{ steps.get-pr.outputs.node_id }}';
+                          isDraft = '${{ steps.get-pr.outputs.is_draft }}' === 'true';
                       } else if (context.eventName === 'workflow_call') {
                           // Handle workflow call
                           const query = `
