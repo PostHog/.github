@@ -8,7 +8,7 @@
 # - Set the status of the PR to 'In Review'
 #
 # Required permissions:
-# - POSTHOG_BOT_GITHUB_TOKEN with:
+# - POSTHOG_PROJECT_BOT_TOKEN with:
 #   - repo scope (for PR operations)
 #   - project scope (for project board operations)
 #   - read:org scope (for team membership checks)
@@ -60,7 +60,7 @@ jobs:
               if: github.event_name == 'workflow_dispatch'
               uses: actions/github-script@v6
               with:
-                  github-token: ${{ secrets.POSTHOG_BOT_GITHUB_TOKEN }}
+                  github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
                       const prNumber = ${{ github.event.inputs.pr_number }};
                       const repo = '${{ github.event.inputs.repository }}';
@@ -84,7 +84,7 @@ jobs:
                   ORG_NAME: '${{ env.ORG_NAME }}'
                   TEAM_SLUG: '${{ env.TEAM_SLUG }}'
               with:
-                  github-token: ${{ secrets.POSTHOG_BOT_GITHUB_TOKEN }}
+                  github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
                       // Debug logging
                       core.info('Event type: ' + context.eventName);
@@ -218,7 +218,7 @@ jobs:
                   PR_NODE_ID: ${{ steps.check.outputs.pr_node_id }}
                   STATUS_OPTION_ID: ${{ steps.check.outputs.status_option_id }}
               with:
-                  github-token: ${{ secrets.POSTHOG_BOT_GITHUB_TOKEN }}
+                  github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
                       const projectId = process.env.PROJECT_V2_ID;
                       const fieldId = process.env.STATUS_FIELD_ID;
