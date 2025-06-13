@@ -164,20 +164,18 @@ jobs:
                       let statusName = '';
 
                       core.info(`Checking reviewers…`);
-                      const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
-                          owner,
-                          repo,
-                          pull_number: prNumber
-                      });
+                      const requestedTeams = pr.requested_teams || [];
+                      const requestedReviewers = pr.requested_reviewers || [];
 
-                      const isTeamRequested = reviewers?.teams?.some(t => t.slug === teamSlug) ?? false;
+                      const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
                       let isMemberRequested = false;
+                      
                       if (isTeamRequested) {
                           core.info(`'${teamSlug}' is requested as a reviewer`);
                       }
                       else {
                           // Get all team members in one call
-                          if (reviewers?.users?.length > 0) {
+                          if (requestedReviewers.length > 0) {
                               core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
                               const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
                                   org: owner,
@@ -186,7 +184,7 @@ jobs:
                               });
                               
                               // Check if any reviewer is in the team members list
-                              isMemberRequested = reviewers.users.some(reviewer => 
+                              isMemberRequested = requestedReviewers.some(reviewer => 
                                   teamMembers.some(member => member.login === reviewer.login)
                               );
                           }
