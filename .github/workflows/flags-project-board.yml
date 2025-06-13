@@ -165,29 +165,21 @@ jobs:
                       let statusOptionId = null;
                       let statusName = '';
 
-                      if (isDraft) {
-                          core.info(`PR #${prNumber} is a draft. Setting status to 'In Progress'.`);
-                          statusOptionId = process.env.IN_PROGRESS_OPTION_ID;
-                          statusName = 'In Progress';
-                      } else {
-                          core.info(`PR #${prNumber} is not a draft. Checking reviewers...`);
-                          // Only check reviewers if PR is not in draft
-                          const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
-                              owner,
-                              repo,
-                              pull_number: prNumber
-                          });
+                      core.info(`Checking reviewers...`);
+                      const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
+                          owner,
+                          repo,
+                          pull_number: prNumber
+                      });
 
-                          const isTeamRequested = reviewers?.teams?.some(t => t.slug === teamSlug) ?? false;
-                          if (isTeamRequested) {
-                              core.info(`'${teamSlug}' is requested as a reviewer`);
-                          }
-                          else {
-                              core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team.`);
-                          }
-                          
+                      const isTeamRequested = reviewers?.teams?.some(t => t.slug === teamSlug) ?? false;
+                      let isMemberRequested = false;
+                      if (isTeamRequested) {
+                          core.info(`'${teamSlug}' is requested as a reviewer`);
+                      }
+                      else {
+                          core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
                           // Get all team members in one call
-                          let isMemberRequested = false;
                           if (reviewers?.users?.length > 0) {
                               const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
                                   org: owner,
@@ -200,15 +192,23 @@ jobs:
                                   teamMembers.some(member => member.login === reviewer.login)
                               );
                           }
-
-                          if (isTeamRequested || isMemberRequested) {
-                              core.info(`PR #${prNumber} is ready and has a reviewer from team '${teamSlug}'. Setting status to 'In Review'.`);
-                              statusOptionId = process.env.IN_REVIEW_OPTION_ID;
-                              statusName = 'In Review';
-                          } else {
-                              core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
+                          else {
+                              core.info(`No reviewers found. Skipping.`);
                           }
                       }
+
+                      if (isTeamRequested || isMemberRequested) {
+                          const status = isDraft 
+                              ? { id: process.env.IN_PROGRESS_OPTION_ID, name: 'In Progress' }
+                              : { id: process.env.IN_REVIEW_OPTION_ID, name: 'In Review' };
+                          
+                          core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} is ready and has a reviewer from team '${teamSlug}'. Setting status to '${status.name}'.`);
+                          statusOptionId = status.id;
+                          statusName = status.name;
+                      } else {
+                          core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
+                      }
+          
 
                       const shouldAdd = statusOptionId !== null;
                       core.setOutput('should_add', shouldAdd.toString());
