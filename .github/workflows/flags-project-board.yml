@@ -92,6 +92,9 @@ jobs:
                   IN_PROGRESS_OPTION_ID: '${{ env.IN_PROGRESS_OPTION_ID }}'
                   ORG_NAME: '${{ env.ORG_NAME }}'
                   TEAM_SLUG: '${{ env.TEAM_SLUG }}'
+                  PR_NODE_ID: ${{ inputs.pr_node_id }}
+                  IS_DRAFT: ${{ inputs.is_draft }}
+                  PR_NUMBER: ${{ inputs.pr_number }}
               with:
                   github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
@@ -139,11 +142,12 @@ jobs:
                             }
                           `;
                           
-                          const result = await github.graphql(query, { nodeId: context.payload.inputs.pr_node_id });
+                          const nodeId = process.env.PR_NODE_ID;
+                          const result = await github.graphql(query, { nodeId });
                           const prData = result.node;
                           
                           if (!prData) {
-                              throw new Error(`Could not find PR with node ID: ${context.payload.inputs.pr_node_id}`);
+                              throw new Error(`Could not find PR with node ID: ${nodeId}`);
                           }
                           
                           // Extract repository name from nameWithOwner (format: "owner/repo")
@@ -153,13 +157,12 @@ jobs:
                           pr = {
                               number: prData.number,
                               draft: prData.isDraft,
-                              node_id: context.payload.inputs.pr_node_id,
+                              node_id: nodeId,
                               base: { repo: { name: repo } },
                               requested_reviewers: prData.requestedReviewers.nodes.filter(r => 'login' in r),
                               requested_teams: prData.requestedReviewers.nodes.filter(r => 'slug' in r)
                           };
-                          nodeId = context.payload.inputs.pr_node_id;
-                          isDraft = prData.isDraft;
+                          isDraft = process.env.IS_DRAFT === 'true';
                       } else {
                           throw new Error(`Unsupported event type: ${context.eventName}`);
                       }
@@ -275,9 +278,6 @@ jobs:
                       }
 
                       core.info(`Checking if PR is already in project '${project.title}'…`);
-
-                      let existingItemId = null;
-                      let existingPR = null;
 
                       // First, get the PR details using the node ID
                       const prQuery = `
