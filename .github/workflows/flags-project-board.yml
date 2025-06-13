@@ -26,8 +26,9 @@ env:
 
 on:
     workflow_call:
-        # workflow_call means the workflow is called from another workflow via the uses: keyword
-        # But the github.event_name is the original event name (e.g. pull_request).
+        # 'workflow_call' means the workflow is called from another workflow via the uses: keyword
+        # But the github.event_name is the original event name (e.g. pull_request) because this workflow 
+        # lives in the special .github repository (It's a not well-documented special case).
         inputs:
             pr_number:
                 description: 'The number of the pull request'
@@ -55,16 +56,12 @@ on:
 jobs:
     add-to-project-board:
         runs-on: ubuntu-latest
-        # CONFUSING: When the workflow is called via `workflow_call` (aka from another workflow via the uses: keyword),
-        # the github.event_name is the original event name (e.g. pull_request), even though the workflow is called from workflow_call.
-        # That's why we have workflow_call in the on: section, and not pull_request, but we have pull_request here:
+        # When the workflow is called via `workflow_call` (aka from another workflow via the uses: keyword), from another repository,
+        # the github.event_name is supposed to be `workflow_call`, but because this workflow lives in the special `.github` repository,
+        # it preserves the original event name (e.g. pull_request).
+        # This is a not well-documented special case.
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
         steps:
-            - name: Debug event name
-              uses: actions/github-script@v6
-              with:
-                  script: |
-                      core.info(`Event name: ${context.eventName}`);
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
               if: github.event_name == 'workflow_dispatch'
@@ -166,7 +163,7 @@ jobs:
                       let statusOptionId = null;
                       let statusName = '';
 
-                      core.info(`Checking reviewers...`);
+                      core.info(`Checking reviewers…`);
                       const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
                           owner,
                           repo,
@@ -179,9 +176,9 @@ jobs:
                           core.info(`'${teamSlug}' is requested as a reviewer`);
                       }
                       else {
-                          core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
                           // Get all team members in one call
                           if (reviewers?.users?.length > 0) {
+                              core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
                               const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
                                   org: owner,
                                   team_slug: teamSlug,
@@ -268,7 +265,7 @@ jobs:
                           throw new Error(`Could not find status option with ID ${optionId} in field '${statusField.name}'. Please check the status option IDs in the environment variables.`);
                       }
 
-                      core.info(`Checking if PR is already in project '${project.title}'...`);
+                      core.info(`Checking if PR is already in project '${project.title}'…`);
 
                       let existingItemId = null;
                       let existingPR = null;
@@ -296,17 +293,12 @@ jobs:
                       core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'...`);
 
                       const query = `
-                        query($projectId: ID!) {
+                        query($projectId: ID!, $contentId: ID!) {
                           node(id: $projectId) {
                             ... on ProjectV2 {
-                              items(first: 100) { # Limit is sufficient for our team size
+                              items(first: 1, filter: { contentId: $contentId }) {
                                 nodes {
                                   id
-                                  content {
-                                    ... on PullRequest { 
-                                      id
-                                    }
-                                  }
                                 }
                               }
                             }
@@ -314,15 +306,9 @@ jobs:
                         }
                       `;
 
-                      const result = await github.graphql(query, { projectId });
+                      const result = await github.graphql(query, { projectId, contentId });
                       const items = result.node.items.nodes;
-
-                      for (const item of items) {
-                          if (item.content?.id === contentId) {
-                              existingItemId = item.id;
-                              break;
-                          }
-                      }
+                      const existingItemId = items.length > 0 ? items[0].id : null;
 
                       if (existingItemId) {
                           core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'...`);
