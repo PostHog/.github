@@ -55,6 +55,15 @@ jobs:
         runs-on: ubuntu-latest
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.event_name == 'pull_request'
         steps:
+            - name: Debug event name
+              uses: actions/github-script@v6
+              with:
+                  script: |
+                      core.info(`Event name: ${github.event_name}`);
+                      core.info(`Event payload: ${JSON.stringify(github.event.payload, null, 2)}`);
+                      core.info(`Event inputs: ${JSON.stringify(github.event.inputs, null, 2)}`);
+                      core.info(`Event ref: ${github.ref}`);
+                      core.info(`Event sha: ${context.sha}`);
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
               if: github.event_name == 'workflow_dispatch'
@@ -91,9 +100,7 @@ jobs:
                       // Debug logging
                       core.info('Event type: ' + context.eventName);
                       
-                      let pr;
-                      let isDraft;
-                      let nodeId;
+                      let pr, isDraft, nodeId;
                       
                       // Convert is_draft to boolean once at the start
                       if (context.eventName === 'pull_request') {
