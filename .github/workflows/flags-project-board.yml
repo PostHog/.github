@@ -124,6 +124,16 @@ jobs:
                                   repository {
                                     nameWithOwner
                                   }
+                                  requestedReviewers(first: 100) {
+                                    nodes {
+                                      ... on User {
+                                        login
+                                      }
+                                      ... on Team {
+                                        slug
+                                      }
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -139,16 +149,17 @@ jobs:
                           // Extract repository name from nameWithOwner (format: "owner/repo")
                           const [owner, repo] = prData.repository.nameWithOwner.split('/');
                           
-                          // Get full PR details
-                          const prResponse = await github.rest.pulls.get({
-                              owner,
-                              repo,
-                              pull_number: prData.number
-                          });
-                          
-                          pr = prResponse.data;
+                          // Use the PR data directly from GraphQL
+                          pr = {
+                              number: prData.number,
+                              draft: prData.isDraft,
+                              node_id: context.payload.inputs.pr_node_id,
+                              base: { repo: { name: repo } },
+                              requested_reviewers: prData.requestedReviewers.nodes.filter(r => 'login' in r),
+                              requested_teams: prData.requestedReviewers.nodes.filter(r => 'slug' in r)
+                          };
                           nodeId = context.payload.inputs.pr_node_id;
-                          isDraft = context.payload.inputs.is_draft;  // Boolean from the calling workflow's inputs
+                          isDraft = prData.isDraft;
                       } else {
                           throw new Error(`Unsupported event type: ${context.eventName}`);
                       }
