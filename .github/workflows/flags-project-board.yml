@@ -26,8 +26,9 @@ env:
 
 on:
     workflow_call:
-        # workflow_call means the workflow is called from another workflow via the uses: keyword
-        # But the github.event_name is the original event name (e.g. pull_request).
+        # 'workflow_call' means the workflow is called from another workflow via the uses: keyword
+        # But the github.event_name is the original event name (e.g. pull_request) because this workflow 
+        # lives in the special .github repository (It's a not well-documented special case).
         inputs:
             pr_number:
                 description: 'The number of the pull request'
@@ -55,16 +56,12 @@ on:
 jobs:
     add-to-project-board:
         runs-on: ubuntu-latest
-        # CONFUSING: When the workflow is called via `workflow_call` (aka from another workflow via the uses: keyword),
-        # the github.event_name is the original event name (e.g. pull_request), even though the workflow is called from workflow_call.
-        # That's why we have workflow_call in the on: section, and not pull_request, but we have pull_request here:
+        # When the workflow is called via `workflow_call` (aka from another workflow via the uses: keyword), from another repository,
+        # the github.event_name is supposed to be `workflow_call`, but because this workflow lives in the special `.github` repository,
+        # it preserves the original event name (e.g. pull_request).
+        # This is a not well-documented special case.
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
         steps:
-            - name: Debug event name
-              uses: actions/github-script@v6
-              with:
-                  script: |
-                      core.info(`Event name: ${context.eventName}`);
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
               if: github.event_name == 'workflow_dispatch'
@@ -95,6 +92,9 @@ jobs:
                   IN_PROGRESS_OPTION_ID: '${{ env.IN_PROGRESS_OPTION_ID }}'
                   ORG_NAME: '${{ env.ORG_NAME }}'
                   TEAM_SLUG: '${{ env.TEAM_SLUG }}'
+                  PR_NODE_ID: ${{ inputs.pr_node_id }}
+                  IS_DRAFT: ${{ inputs.is_draft }}
+                  PR_NUMBER: ${{ inputs.pr_number }}
               with:
                   github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
@@ -127,31 +127,42 @@ jobs:
                                   repository {
                                     nameWithOwner
                                   }
+                                  requestedReviewers(first: 100) {
+                                    nodes {
+                                      ... on User {
+                                        login
+                                      }
+                                      ... on Team {
+                                        slug
+                                      }
+                                    }
+                                  }
                                 }
                               }
                             }
                           `;
                           
-                          const result = await github.graphql(query, { nodeId: context.payload.inputs.pr_node_id });
+                          const nodeId = process.env.PR_NODE_ID;
+                          const result = await github.graphql(query, { nodeId });
                           const prData = result.node;
                           
                           if (!prData) {
-                              throw new Error(`Could not find PR with node ID: ${context.payload.inputs.pr_node_id}`);
+                              throw new Error(`Could not find PR with node ID: ${nodeId}`);
                           }
                           
                           // Extract repository name from nameWithOwner (format: "owner/repo")
                           const [owner, repo] = prData.repository.nameWithOwner.split('/');
                           
-                          // Get full PR details
-                          const prResponse = await github.rest.pulls.get({
-                              owner,
-                              repo,
-                              pull_number: prData.number
-                          });
-                          
-                          pr = prResponse.data;
-                          nodeId = context.payload.inputs.pr_node_id;
-                          isDraft = context.payload.inputs.is_draft;  // Boolean from the calling workflow's inputs
+                          // Use the PR data directly from GraphQL
+                          pr = {
+                              number: prData.number,
+                              draft: prData.isDraft,
+                              node_id: nodeId,
+                              base: { repo: { name: repo } },
+                              requested_reviewers: prData.requestedReviewers.nodes.filter(r => 'login' in r),
+                              requested_teams: prData.requestedReviewers.nodes.filter(r => 'slug' in r)
+                          };
+                          isDraft = process.env.IS_DRAFT === 'true';
                       } else {
                           throw new Error(`Unsupported event type: ${context.eventName}`);
                       }
@@ -166,22 +177,20 @@ jobs:
                       let statusOptionId = null;
                       let statusName = '';
 
-                      core.info(`Checking reviewers...`);
-                      const { data: reviewers } = await github.rest.pulls.listRequestedReviewers({
-                          owner,
-                          repo,
-                          pull_number: prNumber
-                      });
+                      core.info(`Checking reviewers…`);
+                      const requestedTeams = pr.requested_teams || [];
+                      const requestedReviewers = pr.requested_reviewers || [];
 
-                      const isTeamRequested = reviewers?.teams?.some(t => t.slug === teamSlug) ?? false;
+                      const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
                       let isMemberRequested = false;
+                      
                       if (isTeamRequested) {
                           core.info(`'${teamSlug}' is requested as a reviewer`);
                       }
                       else {
-                          core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
                           // Get all team members in one call
-                          if (reviewers?.users?.length > 0) {
+                          if (requestedReviewers.length > 0) {
+                              core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
                               const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
                                   org: owner,
                                   team_slug: teamSlug,
@@ -189,7 +198,7 @@ jobs:
                               });
                               
                               // Check if any reviewer is in the team members list
-                              isMemberRequested = reviewers.users.some(reviewer => 
+                              isMemberRequested = requestedReviewers.some(reviewer => 
                                   teamMembers.some(member => member.login === reviewer.login)
                               );
                           }
@@ -268,10 +277,7 @@ jobs:
                           throw new Error(`Could not find status option with ID ${optionId} in field '${statusField.name}'. Please check the status option IDs in the environment variables.`);
                       }
 
-                      core.info(`Checking if PR is already in project '${project.title}'...`);
-
-                      let existingItemId = null;
-                      let existingPR = null;
+                      core.info(`Checking if PR is already in project '${project.title}'…`);
 
                       // First, get the PR details using the node ID
                       const prQuery = `
@@ -296,17 +302,12 @@ jobs:
                       core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'...`);
 
                       const query = `
-                        query($projectId: ID!) {
+                        query($projectId: ID!, $contentId: ID!) {
                           node(id: $projectId) {
                             ... on ProjectV2 {
-                              items(first: 100) { # Limit is sufficient for our team size
+                              items(first: 1, filter: { contentId: $contentId }) {
                                 nodes {
                                   id
-                                  content {
-                                    ... on PullRequest { 
-                                      id
-                                    }
-                                  }
                                 }
                               }
                             }
@@ -314,15 +315,9 @@ jobs:
                         }
                       `;
 
-                      const result = await github.graphql(query, { projectId });
+                      const result = await github.graphql(query, { projectId, contentId });
                       const items = result.node.items.nodes;
-
-                      for (const item of items) {
-                          if (item.content?.id === contentId) {
-                              existingItemId = item.id;
-                              break;
-                          }
-                      }
+                      const existingItemId = items.length > 0 ? items[0].id : null;
 
                       if (existingItemId) {
                           core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'...`);
