@@ -53,17 +53,13 @@ on:
 jobs:
     add-to-project-board:
         runs-on: ubuntu-latest
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.event_name == 'pull_request'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
         steps:
             - name: Debug event name
               uses: actions/github-script@v6
               with:
                   script: |
-                      core.info(`Event name: ${github.event_name}`);
-                      core.info(`Event payload: ${JSON.stringify(github.event.payload, null, 2)}`);
-                      core.info(`Event inputs: ${JSON.stringify(github.event.inputs, null, 2)}`);
-                      core.info(`Event ref: ${github.ref}`);
-                      core.info(`Event sha: ${context.sha}`);
+                      core.info(`Event name: ${context.eventName}`);
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
               if: github.event_name == 'workflow_dispatch'
