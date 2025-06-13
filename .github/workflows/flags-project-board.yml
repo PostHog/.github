@@ -301,7 +301,7 @@ jobs:
 
                       core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'...`);
 
-                      # Unfortunately the GraphQL API doesn't allow filtering by content id as part of the query afaict.
+                      // Unfortunately the GraphQL API doesn't allow filtering by content id as part of the query afaict.
                       const query = `
                         query($projectId: ID!) {
                           node(id: $projectId) {
