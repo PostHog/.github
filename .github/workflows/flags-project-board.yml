@@ -301,13 +301,19 @@ jobs:
 
                       core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'...`);
 
+                      # Unfortunately the GraphQL API doesn't allow filtering by content id as part of the query afaict.
                       const query = `
-                        query($projectId: ID!, $contentId: ID!) {
+                        query($projectId: ID!) {
                           node(id: $projectId) {
                             ... on ProjectV2 {
-                              items(first: 1, filter: { contentId: $contentId }) {
+                              items(first: 100) {
                                 nodes {
                                   id
+                                  content {
+                                    ... on PullRequest {
+                                      id
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -315,9 +321,9 @@ jobs:
                         }
                       `;
 
-                      const result = await github.graphql(query, { projectId, contentId });
+                      const result = await github.graphql(query, { projectId });
                       const items = result.node.items.nodes;
-                      const existingItemId = items.length > 0 ? items[0].id : null;
+                      const existingItemId = items.find(item => item.content?.id === contentId)?.id || null;
 
                       if (existingItemId) {
                           core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'...`);
