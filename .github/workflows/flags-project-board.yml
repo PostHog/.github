@@ -323,7 +323,7 @@ jobs:
 
                       const result = await github.graphql(query, { projectId });
                       const items = result.node.items.nodes;
-                      const existingItemId = items.find(item => item.content?.id === contentId)?.id || null;
+                      let existingItemId = items.find(item => item.content?.id === contentId)?.id || null;
 
                       if (existingItemId) {
                           core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'...`);
