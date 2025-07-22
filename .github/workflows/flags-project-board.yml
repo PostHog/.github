@@ -6,6 +6,8 @@
 # - Set the status of the PR to 'In Progress'
 # When a PR is marked ready for review, the workflow will:
 # - Set the status of the PR to 'In Review'
+# When changes are requested on a PR review, the workflow will:
+# - Set the status of the PR to 'In Progress'
 #
 # Required permissions:
 # - POSTHOG_PROJECT_BOT_TOKEN with:
@@ -42,6 +44,8 @@ on:
                 description: 'Whether the pull request is in draft mode'
                 required: true
                 type: boolean
+    pull_request_review:
+        types: [submitted]
     workflow_dispatch:
         inputs:
             pr_number:
@@ -60,7 +64,7 @@ jobs:
         # the github.event_name is supposed to be `workflow_call`, but because this workflow lives in the special `.github` repository,
         # it preserves the original event name (e.g. pull_request).
         # This is a not well-documented special case.
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         steps:
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
@@ -108,6 +112,11 @@ jobs:
                           // Handle direct PR event
                           pr = context.payload.pull_request;
                           isDraft = pr.draft;  // pr.draft is already a boolean from the GitHub API
+                          nodeId = pr.node_id;
+                      } else if (context.eventName === 'pull_request_review') {
+                          // Handle pull request review event
+                          pr = context.payload.pull_request;
+                          isDraft = pr.draft;
                           nodeId = pr.node_id;
                       } else if (context.eventName === 'workflow_dispatch') {
                           // Handle manual dispatch
@@ -208,11 +217,20 @@ jobs:
                       }
 
                       if (isTeamRequested || isMemberRequested) {
-                          const status = isDraft 
-                              ? { id: process.env.IN_PROGRESS_OPTION_ID, name: 'In Progress' }
-                              : { id: process.env.IN_REVIEW_OPTION_ID, name: 'In Review' };
+                          let status;
                           
-                          core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} is ready and has a reviewer from team '${teamSlug}'. Setting status to '${status.name}'.`);
+                          // Check if this is a pull request review event with changes requested
+                          if (context.eventName === 'pull_request_review' && context.payload.review.state === 'changes_requested') {
+                              status = { id: process.env.IN_PROGRESS_OPTION_ID, name: 'In Progress' };
+                              core.info(`Changes requested on PR #${prNumber}. Setting status to '${status.name}'.`);
+                          } else {
+                              // Default logic for other events
+                              status = isDraft 
+                                  ? { id: process.env.IN_PROGRESS_OPTION_ID, name: 'In Progress' }
+                                  : { id: process.env.IN_REVIEW_OPTION_ID, name: 'In Review' };
+                              core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} is ready and has a reviewer from team '${teamSlug}'. Setting status to '${status.name}'.`);
+                          }
+                          
                           statusOptionId = status.id;
                           statusName = status.name;
                       } else {
