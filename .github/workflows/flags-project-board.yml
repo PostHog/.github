@@ -9,12 +9,11 @@
 # When changes are requested on a PR review, the workflow will:
 # - Set the status of the PR to 'In Progress'
 #
-# Required GitHub App permissions:
-# - PROJECT_BOARD_BOT_APP_ID and PROJECT_BOARD_BOT_PRIVATE_KEY secrets
-# - App permissions needed:
-#   - Repository: Pull requests (read)
-#   - Organization: Projects (read & write)
-#   - Organization: Members (read)
+# Required permissions:
+# - POSTHOG_PROJECT_BOT_TOKEN with:
+#   - repo scope (for PR operations)
+#   - project scope (for project board operations)
+#   - read:org scope (for team membership checks)
 
 name: Add PR to Feature Flags Project
 
@@ -67,19 +66,12 @@ jobs:
         # This is a not well-documented special case.
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         steps:
-            - name: Generate GitHub App Token
-              id: app-token
-              uses: actions/create-github-app-token@v1
-              with:
-                  app-id: ${{ secrets.PROJECT_BOARD_BOT_APP_ID }}
-                  private-key: ${{ secrets.PROJECT_BOARD_BOT_PRIVATE_KEY }}
-                  owner: ${{ env.ORG_NAME }}
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
               if: github.event_name == 'workflow_dispatch'
               uses: actions/github-script@v6
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
                       const prNumber = ${{ github.event.inputs.pr_number }};
                       const repo = '${{ github.event.inputs.repository }}';
@@ -108,7 +100,7 @@ jobs:
                   IS_DRAFT: ${{ inputs.is_draft }}
                   PR_NUMBER: ${{ inputs.pr_number }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
                       // Debug logging
                       core.info('Event type: ' + context.eventName);
@@ -259,7 +251,7 @@ jobs:
                   PR_NODE_ID: ${{ steps.check.outputs.pr_node_id }}
                   STATUS_OPTION_ID: ${{ steps.check.outputs.status_option_id }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ secrets.POSTHOG_PROJECT_BOT_TOKEN }}
                   script: |
                       const projectId = process.env.PROJECT_V2_ID;
                       const fieldId = process.env.STATUS_FIELD_ID;
