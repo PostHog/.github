@@ -74,6 +74,40 @@ jobs:
                   app-id: ${{ secrets.PROJECT_BOARD_BOT_APP_ID }}
                   private-key: ${{ secrets.PROJECT_BOARD_BOT_PRIVATE_KEY }}
                   owner: ${{ env.ORG_NAME }}
+            - name: Debug Token Permissions
+              uses: actions/github-script@v6
+              with:
+                  github-token: ${{ steps.app-token.outputs.token }}
+                  script: |
+                      // Check what permissions the token has
+                      try {
+                          const { data: rateLimit } = await github.rest.rateLimit.get();
+                          core.info('Token is valid and can make API calls');
+                          
+                          // Try to query the project to see if we have access
+                          const projectId = '${{ env.PROJECT_V2_ID }}';
+                          const query = `
+                            query($projectId: ID!) {
+                              node(id: $projectId) {
+                                ... on ProjectV2 {
+                                  title
+                                }
+                              }
+                            }
+                          `;
+                          
+                          const result = await github.graphql(query, { projectId });
+                          if (result.node) {
+                              core.info(`✅ Successfully accessed project: ${result.node.title}`);
+                          } else {
+                              core.warning('⚠️ Project query returned null - check if PROJECT_V2_ID is correct');
+                          }
+                      } catch (error) {
+                          core.error(`❌ Failed to access project: ${error.message}`);
+                          core.error('This usually means the GitHub App lacks organization project permissions');
+                          core.error('Please ensure the app has "Organization: Projects (Read & Write)" permission');
+                          core.error('And that the app is installed at the organization level, not just repository level');
+                      }
             - name: Get PR Node ID for workflow_dispatch
               id: get-pr
               if: github.event_name == 'workflow_dispatch'
