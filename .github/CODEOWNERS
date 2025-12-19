@@ -1,1 +1,7 @@
+# this repo's actions are used broadly throughout our org, so we need to keep them well protected.
+# if this ends up becoming a nuisance we can revisit making this less restrictive
+.github/ @PostHog/team-security
+workflows/ @PostHog/team-security
+
+# we explicitly want this Action to be owned by security, even if the above rules are removed
 .github/workflows/ci-security.yaml @PostHog/team-security
