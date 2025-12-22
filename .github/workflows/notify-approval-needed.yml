@@ -52,7 +52,7 @@ jobs:
           # Get current commit SHA
           CURRENT_SHA=$(git rev-parse HEAD)
           echo "current_sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
-          echo "current_sha_short=${CURRENT_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "current_sha_short=${CURRENT_SHA:0:8}" >> "$GITHUB_OUTPUT"
 
           # Get commit count
           COMMIT_COUNT=$(git rev-list --count "$LATEST_TAG"..HEAD 2>/dev/null || echo "N/A")
