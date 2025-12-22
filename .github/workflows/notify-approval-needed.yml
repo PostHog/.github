@@ -1,0 +1,156 @@
+name: Notify Slack - Release Approval
+
+on:
+  workflow_call:
+    inputs:
+      slack_channel_id:
+        required: true
+        type: string
+      slack_user_group_id:
+        required: true
+        type: string
+    secrets:
+      slack_bot_token:
+        required: true
+      posthog_project_api_key:
+        required: true
+    outputs:
+      slack_ts:
+        description: "Slack message timestamp for threading replies"
+        value: ${{ jobs.notify.outputs.slack_ts }}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    outputs:
+      slack_ts: ${{ steps.notify.outputs.slack_ts }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag info
+        id: get-tag-info
+        shell: bash
+        run: |
+          # Fetch all tags
+          git fetch --tags --force
+
+          # Get the most recent tag (sorted by date, not version)
+          # Note: Use read instead of piping to head to avoid SIGPIPE (exit 141)
+          ALL_TAGS=$(git tag --sort=-creatordate)
+          read -r LATEST_TAG <<< "$ALL_TAGS"
+
+          if [ -z "$LATEST_TAG" ]; then
+          echo "No tags found, using initial commit"
+          LATEST_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+          # Get current commit SHA
+          CURRENT_SHA=$(git rev-parse HEAD)
+          echo "current_sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
+          echo "current_sha_short=${CURRENT_SHA:0:8}" >> "$GITHUB_OUTPUT"
+
+          # Get commit count
+          COMMIT_COUNT=$(git rev-list --count "$LATEST_TAG"..HEAD 2>/dev/null || echo "N/A")
+          echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack notification
+        id: notify
+        uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
+        continue-on-error: true
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.slack_bot_token }}
+          payload: |
+            {
+                "channel": "${{ inputs.slack_channel_id }}",
+                "text": "🚀 Release Approval Needed for ${{ github.repository }}",
+                "blocks": [
+                {
+                    "type": "header",
+                    "text": {
+                    "type": "plain_text",
+                    "text": "🚀 Release Approval Needed - ${{ github.repository }}",
+                    "emoji": true
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                    "type": "mrkdwn",
+                    "text": "A new release is ready for approval in the `${{ github.repository }}` repository."
+                    }
+                },
+                {
+                    "type": "section",
+                    "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "*Repository:*\n<https://github.com/${{ github.repository }}|${{ github.repository }}>"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": "*Latest Tag:*\n`${{ steps.get-tag-info.outputs.latest_tag }}`"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": "*Current Commit:*\n`${{ steps.get-tag-info.outputs.current_sha_short }}`"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": "*Commits since tag:*\n${{ steps.get-tag-info.outputs.commit_count }}"
+                    }
+                    ]
+                },
+                {
+                    "type": "section",
+                    "text": {
+                    "type": "mrkdwn",
+                    "text": "<!subteam^${{ inputs.slack_user_group_id }}|@group-client-libraries> Please review and approve the release."
+                    }
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                        "type": "plain_text",
+                        "text": "View Diff on GitHub",
+                        "emoji": true
+                        },
+                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-tag-info.outputs.latest_tag }}...main"
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                        "type": "plain_text",
+                        "text": "Approve/Reject on GitHub",
+                        "emoji": true
+                        },
+                        "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                        "style": "primary"
+                    }
+                    ]
+                }
+                ]
+            }
+
+      - name: Send Slack failure event to PostHog
+        if: ${{ steps.notify.outcome == 'failure' }}
+        uses: PostHog/posthog-github-action@v0.1
+        with:
+          posthog-token: "${{ secrets.posthog_project_api_key }}"
+          event: "sdk-slack-notification-failure"
+          properties: >-
+            {
+                "step": "notify-approval-needed",
+                "workflow": "release",
+                "repository": "${{ github.repository }}",
+                "run_id": "${{ github.run_id }}",
+                "run_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
