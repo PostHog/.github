@@ -33,8 +33,6 @@ jobs:
       - name: Get latest tag info
         id: get-tag-info
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           # Fetch all tags
           git fetch --tags --force
@@ -61,7 +59,7 @@ jobs:
           echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
 
           # Get default branch from GitHub API
-          DEFAULT_BRANCH=$(gh api "repos/${{ github.repository }}" --jq '.default_branch' | tr -d '\n')
+          DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' | tr -d '\n')
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Send Slack notification
