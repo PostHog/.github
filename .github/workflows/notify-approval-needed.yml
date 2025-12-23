@@ -23,7 +23,7 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     outputs:
-      slack_ts: ${{ steps.notify.outputs.slack_ts }}
+      slack_ts: ${{ steps.notify.outputs.ts }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
