@@ -30,34 +30,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get latest tag info
-        id: get-tag-info
+      - name: Get default branch
+        id: get-default-branch
         shell: bash
         run: |
-          # Fetch all tags
-          git fetch --tags --force
-
-          # Get the most recent tag (sorted by date, not version)
-          # Note: Use read instead of piping to head to avoid SIGPIPE (exit 141)
-          ALL_TAGS=$(git tag --sort=-creatordate)
-          read -r LATEST_TAG <<< "$ALL_TAGS"
-
-          if [ -z "$LATEST_TAG" ]; then
-          echo "No tags found, using initial commit"
-          LATEST_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
-
-          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-
-          # Get current commit SHA
-          CURRENT_SHA=$(git rev-parse HEAD)
-          echo "current_sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
-          echo "current_sha_short=${CURRENT_SHA:0:8}" >> "$GITHUB_OUTPUT"
-
-          # Get commit count
-          COMMIT_COUNT=$(git rev-list --count "$LATEST_TAG"..HEAD 2>/dev/null || echo "N/A")
-          echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
-
           # Get default branch from GitHub API
           DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' | tr -d '\n')
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
@@ -96,18 +72,6 @@ jobs:
                         "type": "mrkdwn",
                         "text": "*Repository:*\n<https://github.com/${{ github.repository }}|${{ github.repository }}>"
                     },
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Latest Tag:*\n`${{ steps.get-tag-info.outputs.latest_tag }}`"
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Current Commit:*\n`${{ steps.get-tag-info.outputs.current_sha_short }}`"
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Commits since tag:*\n${{ steps.get-tag-info.outputs.commit_count }}"
-                    }
                     ]
                 },
                 {
@@ -124,10 +88,10 @@ jobs:
                         "type": "button",
                         "text": {
                         "type": "plain_text",
-                        "text": "View Diff on GitHub",
+                        "text": "View Branch on GitHub",
                         "emoji": true
                         },
-                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-tag-info.outputs.latest_tag }}...${{ steps.get-tag-info.outputs.default_branch }}"
+                        "url": "https://github.com/${{ github.repository }}/tree/${{ steps.get-default-branch.outputs.default_branch }}"
                     },
                     {
                         "type": "button",
