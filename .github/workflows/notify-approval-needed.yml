@@ -30,10 +30,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get default branch
-        id: get-default-branch
+      - name: Get commit info
+        id: get-commit-info
         shell: bash
         run: |
+          # Fetch all tags
+          git fetch --tags --force
+
+          # Get the most recent tag (sorted by date, not version)
+          # Note: Use read instead of piping to head to avoid SIGPIPE (exit 141)
+          ALL_TAGS=$(git tag --sort=-creatordate)
+          read -r LATEST_TAG <<< "$ALL_TAGS"
+
+          if [ -z "$LATEST_TAG" ]; then
+          echo "No tags found, using initial commit"
+          LATEST_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
           # Get default branch from GitHub API
           DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' | tr -d '\n')
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
@@ -88,10 +103,10 @@ jobs:
                         "type": "button",
                         "text": {
                         "type": "plain_text",
-                        "text": "View Branch on GitHub",
+                        "text": "View Diff on GitHub",
                         "emoji": true
                         },
-                        "url": "https://github.com/${{ github.repository }}/tree/${{ steps.get-default-branch.outputs.default_branch }}"
+                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-commit-info.outputs.latest_tag }}...${{ steps.get-commit-info.outputs.default_branch }}"
                     },
                     {
                         "type": "button",
