@@ -30,8 +30,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get latest tag info
-        id: get-tag-info
+      - name: Get info
+        id: get-info
         shell: bash
         run: |
           # Fetch all tags
@@ -48,15 +48,6 @@ jobs:
           fi
 
           echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-
-          # Get current commit SHA
-          CURRENT_SHA=$(git rev-parse HEAD)
-          echo "current_sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
-          echo "current_sha_short=${CURRENT_SHA:0:8}" >> "$GITHUB_OUTPUT"
-
-          # Get commit count
-          COMMIT_COUNT=$(git rev-list --count "$LATEST_TAG"..HEAD 2>/dev/null || echo "N/A")
-          echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
 
           # Get default branch from GitHub API
           DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' | tr -d '\n')
@@ -96,18 +87,6 @@ jobs:
                         "type": "mrkdwn",
                         "text": "*Repository:*\n<https://github.com/${{ github.repository }}|${{ github.repository }}>"
                     },
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Latest Tag:*\n`${{ steps.get-tag-info.outputs.latest_tag }}`"
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Current Commit:*\n`${{ steps.get-tag-info.outputs.current_sha_short }}`"
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Commits since tag:*\n${{ steps.get-tag-info.outputs.commit_count }}"
-                    }
                     ]
                 },
                 {
@@ -127,7 +106,7 @@ jobs:
                         "text": "View Diff on GitHub",
                         "emoji": true
                         },
-                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-tag-info.outputs.latest_tag }}...${{ steps.get-tag-info.outputs.default_branch }}"
+                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-info.outputs.latest_tag }}...${{ steps.get-info.outputs.default_branch }}"
                     },
                     {
                         "type": "button",
