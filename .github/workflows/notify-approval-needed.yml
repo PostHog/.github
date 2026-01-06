@@ -30,8 +30,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get commit info
-        id: get-commit-info
+      - name: Get info
+        id: get-info
         shell: bash
         run: |
           # Fetch all tags
@@ -106,7 +106,7 @@ jobs:
                         "text": "View Diff on GitHub",
                         "emoji": true
                         },
-                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-commit-info.outputs.latest_tag }}...${{ steps.get-commit-info.outputs.default_branch }}"
+                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-info.outputs.latest_tag }}...${{ steps.get-info.outputs.default_branch }}"
                     },
                     {
                         "type": "button",
