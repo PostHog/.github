@@ -93,7 +93,7 @@ jobs:
                     "type": "section",
                     "text": {
                     "type": "mrkdwn",
-                    "text": "<!subteam^${{ inputs.slack_user_group_id }}|@group-client-libraries> Please review and approve the release."
+                    "text": "<!subteam^${{ inputs.slack_user_group_id }}|@client-libraries-approvers-folks> Please review and approve the release."
                     }
                 },
                 {
