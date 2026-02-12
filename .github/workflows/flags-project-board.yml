@@ -1,6 +1,7 @@
-# This workflow manages pull requests in the Feature Flags Project board.
-# When a member of the team specified by TEAM_SLUG is added as a reviewer to a PR, the workflow will:
-# - Add the PR to the project board
+# This workflow manages pull requests on project boards for the Feature Flags teams.
+# It uses a team-to-board mapping (TEAM_BOARD_CONFIG) to route PRs to the correct boards.
+# When a member of a mapped team is added as a reviewer to a PR, the workflow will:
+# - Add the PR to that team's project board
 # - Set the status of the PR to 'In Review'
 # When a PR is converted to draft mode, the workflow will:
 # - Set the status of the PR to 'In Progress'
@@ -8,6 +9,7 @@
 # - Set the status of the PR to 'In Review'
 # When changes are requested on a PR review, the workflow will:
 # - Set the status of the PR to 'In Progress'
+# A single PR can be added to multiple boards if reviewers from multiple teams are requested.
 #
 # Required GitHub App permissions:
 # - PROJECT_BOARD_BOT_APP_ID and PROJECT_BOARD_BOT_PRIVATE_KEY secrets
@@ -18,14 +20,28 @@
 
 name: Add PR to Feature Flags Project
 
-# The IDs below require using the GraphQL API to get them.
+# Each entry maps a GitHub team to a project board. When a member of the team is
+# requested as a reviewer, the PR is added to that team's board. The IDs require
+# using the GraphQL API to retrieve.
 env:
-    PROJECT_V2_ID: PVT_kwDOA5iQ-M4AroCF             # Feature Flags Project
-    STATUS_FIELD_ID: PVTSSF_lADOA5iQ-M4AroCFzgirkuw # Status Field for Feature Flags Project
-    IN_REVIEW_OPTION_ID: 8d24d43c                   # Status: In Review
-    IN_PROGRESS_OPTION_ID: f75ad846                 # Status: In Progress
     ORG_NAME: PostHog
-    TEAM_SLUG: team-feature-flags
+    TEAM_BOARD_CONFIG: |
+        [
+            {
+                "team_slug": "team-feature-flags",
+                "project_v2_id": "PVT_kwDOA5iQ-M4AroCF",
+                "status_field_id": "PVTSSF_lADOA5iQ-M4AroCFzgirkuw",
+                "in_review_option_id": "8d24d43c",
+                "in_progress_option_id": "f75ad846"
+            },
+            {
+                "team_slug": "team-flags-platform",
+                "project_v2_id": "PVT_kwDOA5iQ-M4BPB59",
+                "status_field_id": "PVTSSF_lADOA5iQ-M4BPB59zg9jxJs",
+                "in_review_option_id": "df73e18b",
+                "in_progress_option_id": "47fc9ee4"
+            }
+        ]
 
 on:
     workflow_call:
@@ -99,44 +115,36 @@ jobs:
                       core.setOutput('node_id', pr.node_id);
                       core.setOutput('is_draft', pr.draft.toString());
 
-            - name: Determine PR status and desired project status
+            - name: Determine PR status and matching boards
               id: check
               uses: actions/github-script@v7
               env:
-                  IN_REVIEW_OPTION_ID: '${{ env.IN_REVIEW_OPTION_ID }}'
-                  IN_PROGRESS_OPTION_ID: '${{ env.IN_PROGRESS_OPTION_ID }}'
                   ORG_NAME: '${{ env.ORG_NAME }}'
-                  TEAM_SLUG: '${{ env.TEAM_SLUG }}'
                   PR_NODE_ID: ${{ inputs.pr_node_id }}
                   IS_DRAFT: ${{ inputs.is_draft }}
-                  PR_NUMBER: ${{ inputs.pr_number }}
               with:
                   github-token: ${{ steps.app-token.outputs.token }}
                   script: |
-                      // Debug logging
                       core.info('Event type: ' + context.eventName);
-                      
+
+                      const teamBoardConfig = JSON.parse(process.env.TEAM_BOARD_CONFIG);
+
                       let pr, isDraft, nodeId;
-                      
-                      // Convert is_draft to boolean once at the start
+
                       if (context.eventName === 'pull_request') {
-                          // Handle direct PR event
                           pr = context.payload.pull_request;
-                          isDraft = pr.draft;  // pr.draft is already a boolean from the GitHub API
+                          isDraft = pr.draft;
                           nodeId = pr.node_id;
                       } else if (context.eventName === 'pull_request_review') {
-                          // Handle pull request review event
                           pr = context.payload.pull_request;
                           isDraft = pr.draft;
                           nodeId = pr.node_id;
                       } else if (context.eventName === 'workflow_dispatch') {
-                          // Handle manual dispatch
                           const prData = JSON.parse('${{ steps.get-pr.outputs.pr_data }}');
                           pr = prData;
                           nodeId = '${{ steps.get-pr.outputs.node_id }}';
                           isDraft = '${{ steps.get-pr.outputs.is_draft }}' === 'true';
                       } else if (context.eventName === 'workflow_call') {
-                          // Handle workflow call
                           const query = `
                             query($nodeId: ID!) {
                               node(id: $nodeId) {
@@ -161,19 +169,17 @@ jobs:
                               }
                             }
                           `;
-                          
-                          const nodeId = process.env.PR_NODE_ID;
+
+                          nodeId = process.env.PR_NODE_ID;
                           const result = await github.graphql(query, { nodeId });
                           const prData = result.node;
-                          
+
                           if (!prData) {
                               throw new Error(`Could not find PR with node ID: ${nodeId}`);
                           }
-                          
-                          // Extract repository name from nameWithOwner (format: "owner/repo")
+
                           const [owner, repo] = prData.repository.nameWithOwner.split('/');
-                          
-                          // Use the PR data directly from GraphQL
+
                           pr = {
                               number: prData.number,
                               draft: prData.isDraft,
@@ -186,129 +192,82 @@ jobs:
                       } else {
                           throw new Error(`Unsupported event type: ${context.eventName}`);
                       }
-                      
+
                       const owner = process.env.ORG_NAME;
                       const repo = pr.base.repo.name;
                       const prNumber = pr.number;
-                      const teamSlug = process.env.TEAM_SLUG;
 
                       core.info(`Evaluating PR #${prNumber} (draft: ${isDraft})`);
 
-                      let statusOptionId = null;
-                      let statusName = '';
-
-                      core.info(`Checking reviewers…`);
                       const requestedTeams = pr.requested_teams || [];
                       const requestedReviewers = pr.requested_reviewers || [];
 
-                      const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
-                      let isMemberRequested = false;
-                      
-                      if (isTeamRequested) {
-                          core.info(`'${teamSlug}' is requested as a reviewer`);
-                      }
-                      else {
-                          // Get all team members in one call
-                          if (requestedReviewers.length > 0) {
-                              core.info(`'${teamSlug}' is not requested as a reviewer. Going to check if any reviewer is a member of the team. Requesting up to 100 team members.`);
+                      const matchingBoards = [];
+
+                      for (const config of teamBoardConfig) {
+                          const teamSlug = config.team_slug;
+                          core.info(`Checking team '${teamSlug}'…`);
+
+                          const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
+                          let isMemberRequested = false;
+
+                          if (isTeamRequested) {
+                              core.info(`'${teamSlug}' is requested as a reviewer`);
+                          } else if (requestedReviewers.length > 0) {
+                              core.info(`'${teamSlug}' is not requested directly. Checking if any reviewer is a member…`);
                               const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
                                   org: owner,
                                   team_slug: teamSlug,
-                                  per_page: 100  // Team size is small, 100 is more than enough
+                                  per_page: 100
                               });
-                              
-                              // Check if any reviewer is in the team members list
-                              isMemberRequested = requestedReviewers.some(reviewer => 
+                              isMemberRequested = requestedReviewers.some(reviewer =>
                                   teamMembers.some(member => member.login === reviewer.login)
                               );
-                          }
-                          else {
-                              core.info(`No reviewers found. Skipping.`);
-                          }
-                      }
-
-                      if (isTeamRequested || isMemberRequested) {
-                          let status;
-                          
-                          // Check if this is a pull request review event with changes requested
-                          if (context.eventName === 'pull_request_review' && context.payload.review.state === 'changes_requested') {
-                              status = { id: process.env.IN_PROGRESS_OPTION_ID, name: 'In Progress' };
-                              core.info(`Changes requested on PR #${prNumber}. Setting status to '${status.name}'.`);
                           } else {
-                              // Default logic for other events
-                              status = isDraft 
-                                  ? { id: process.env.IN_PROGRESS_OPTION_ID, name: 'In Progress' }
-                                  : { id: process.env.IN_REVIEW_OPTION_ID, name: 'In Review' };
-                              core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} is ready and has a reviewer from team '${teamSlug}'. Setting status to '${status.name}'.`);
+                              core.info(`No reviewers requested. Skipping team '${teamSlug}'.`);
                           }
-                          
-                          statusOptionId = status.id;
-                          statusName = status.name;
-                      } else {
-                          core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
-                      }
-          
 
-                      const shouldAdd = statusOptionId !== null;
-                      core.setOutput('should_add', shouldAdd.toString());
+                          if (isTeamRequested || isMemberRequested) {
+                              let statusOptionId, statusName;
+
+                              if (context.eventName === 'pull_request_review' && context.payload.review.state === 'changes_requested') {
+                                  statusOptionId = config.in_progress_option_id;
+                                  statusName = 'In Progress';
+                                  core.info(`Changes requested on PR #${prNumber}. Setting status to '${statusName}' on '${teamSlug}' board.`);
+                              } else {
+                                  statusOptionId = isDraft ? config.in_progress_option_id : config.in_review_option_id;
+                                  statusName = isDraft ? 'In Progress' : 'In Review';
+                                  core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${statusName}'.`);
+                              }
+
+                              matchingBoards.push({
+                                  team_slug: teamSlug,
+                                  project_v2_id: config.project_v2_id,
+                                  status_field_id: config.status_field_id,
+                                  status_option_id: statusOptionId
+                              });
+                          } else {
+                              core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
+                          }
+                      }
+
+                      core.info(`Matched ${matchingBoards.length} board(s).`);
+                      core.setOutput('has_matches', (matchingBoards.length > 0).toString());
+                      core.setOutput('matching_boards', JSON.stringify(matchingBoards));
                       core.setOutput('pr_node_id', nodeId);
-                      core.setOutput('status_option_id', statusOptionId ?? '');
-            - name: Update Project Board
-              if: steps.check.outputs.should_add == 'true'
+            - name: Update Project Boards
+              if: steps.check.outputs.has_matches == 'true'
               uses: actions/github-script@v7
               env:
-                  PROJECT_V2_ID: ${{ env.PROJECT_V2_ID }}
-                  STATUS_FIELD_ID: ${{ env.STATUS_FIELD_ID }}
+                  MATCHING_BOARDS: '${{ steps.check.outputs.matching_boards }}'
                   PR_NODE_ID: ${{ steps.check.outputs.pr_node_id }}
-                  STATUS_OPTION_ID: ${{ steps.check.outputs.status_option_id }}
               with:
                   github-token: ${{ steps.app-token.outputs.token }}
                   script: |
-                      const projectId = process.env.PROJECT_V2_ID;
-                      const fieldId = process.env.STATUS_FIELD_ID;
-                      const optionId = process.env.STATUS_OPTION_ID;
+                      const matchingBoards = JSON.parse(process.env.MATCHING_BOARDS);
                       const contentId = process.env.PR_NODE_ID;
 
-                      // Get project details
-                      const projectQuery = `
-                        query($projectId: ID!) {
-                          node(id: $projectId) {
-                            ... on ProjectV2 {
-                              title
-                              fields(first: 10) {
-                                nodes {
-                                  ... on ProjectV2SingleSelectField {
-                                    id
-                                    name
-                                    options {
-                                      id
-                                      name
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      `;
-
-                      const projectResult = await github.graphql(projectQuery, { projectId });
-                      const project = projectResult.node;
-                      const statusField = project.fields.nodes.find(f => f.id === fieldId);
-                      
-                      if (!statusField) {
-                          throw new Error(`Could not find status field with ID ${fieldId} in project '${project.title}'. Please check the STATUS_FIELD_ID environment variable.`);
-                      }
-                      
-                      const statusOption = statusField.options.find(o => o.id === optionId);
-                      
-                      if (!statusOption) {
-                          throw new Error(`Could not find status option with ID ${optionId} in field '${statusField.name}'. Please check the status option IDs in the environment variables.`);
-                      }
-
-                      core.info(`Checking if PR is already in project '${project.title}'…`);
-
-                      // First, get the PR details using the node ID
+                      // Fetch PR details once for logging across all board updates
                       const prQuery = `
                         query($nodeId: ID!) {
                           node(id: $nodeId) {
@@ -320,82 +279,133 @@ jobs:
                           }
                         }
                       `;
-                      
+
                       const prResult = await github.graphql(prQuery, { nodeId: contentId });
                       const prData = prResult.node;
-                      
+
                       if (!prData) {
                           throw new Error(`Could not find PR with node ID: ${contentId}`);
                       }
 
-                      core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'...`);
+                      const errors = [];
 
-                      // Unfortunately the GraphQL API doesn't allow filtering by content id as part of the query afaict.
-                      const query = `
-                        query($projectId: ID!) {
-                          node(id: $projectId) {
-                            ... on ProjectV2 {
-                              items(first: 100) {
-                                nodes {
-                                  id
-                                  content {
-                                    ... on PullRequest {
+                      for (const board of matchingBoards) {
+                          const projectId = board.project_v2_id;
+                          const fieldId = board.status_field_id;
+                          const optionId = board.status_option_id;
+
+                          try {
+                              // Get project details to validate field and option IDs
+                              const projectQuery = `
+                                query($projectId: ID!) {
+                                  node(id: $projectId) {
+                                    ... on ProjectV2 {
+                                      title
+                                      fields(first: 10) {
+                                        nodes {
+                                          ... on ProjectV2SingleSelectField {
+                                            id
+                                            name
+                                            options {
+                                              id
+                                              name
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              `;
+
+                              const projectResult = await github.graphql(projectQuery, { projectId });
+                              const project = projectResult.node;
+                              const statusField = project.fields.nodes.find(f => f.id === fieldId);
+
+                              if (!statusField) {
+                                  throw new Error(`Could not find status field with ID ${fieldId} in project '${project.title}'.`);
+                              }
+
+                              const statusOption = statusField.options.find(o => o.id === optionId);
+
+                              if (!statusOption) {
+                                  throw new Error(`Could not find status option with ID ${optionId} in field '${statusField.name}'.`);
+                              }
+
+                              core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'…`);
+
+                              // Unfortunately the GraphQL API doesn't allow filtering by content ID as part of the query.
+                              const itemsQuery = `
+                                query($projectId: ID!) {
+                                  node(id: $projectId) {
+                                    ... on ProjectV2 {
+                                      items(first: 100) {
+                                        nodes {
+                                          id
+                                          content {
+                                            ... on PullRequest {
+                                              id
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              `;
+
+                              const result = await github.graphql(itemsQuery, { projectId });
+                              const items = result.node.items.nodes;
+                              let existingItemId = items.find(item => item.content?.id === contentId)?.id || null;
+
+                              if (existingItemId) {
+                                  core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'…`);
+                              } else {
+                                  core.info(`Adding PR #${prData.number} (${prData.title}) to project '${project.title}'…`);
+                                  const addItemMutation = `
+                                    mutation($projectId: ID!, $contentId: ID!) {
+                                      addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                                        item {
+                                          id
+                                        }
+                                      }
+                                    }
+                                  `;
+
+                                  const response = await github.graphql(addItemMutation, { projectId, contentId });
+                                  existingItemId = response.addProjectV2ItemById.item.id;
+                                  core.info(`Added PR #${prData.number} (${prData.title}) to project '${project.title}'.`);
+                              }
+
+                              const updateStatusMutation = `
+                                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                                  updateProjectV2ItemFieldValue(input: {
+                                    projectId: $projectId,
+                                    itemId: $itemId,
+                                    fieldId: $fieldId,
+                                    value: { singleSelectOptionId: $optionId }
+                                  }) {
+                                    projectV2Item {
                                       id
                                     }
                                   }
                                 }
-                              }
-                            }
+                              `;
+
+                              await github.graphql(updateStatusMutation, {
+                                  projectId,
+                                  itemId: existingItemId,
+                                  fieldId,
+                                  optionId
+                              });
+                              core.info(`Updated PR #${prData.number} (${prData.title}) status to '${statusOption.name}' in project '${project.title}'.`);
+                          } catch (error) {
+                              const msg = `Failed to update board for team '${board.team_slug}': ${error.message}`;
+                              core.error(msg);
+                              errors.push(msg);
                           }
-                        }
-                      `;
-
-                      const result = await github.graphql(query, { projectId });
-                      const items = result.node.items.nodes;
-                      let existingItemId = items.find(item => item.content?.id === contentId)?.id || null;
-
-                      if (existingItemId) {
-                          core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'...`);
-                      } else {
-                          core.info(`Adding PR #${prData.number} (${prData.title}) to project '${project.title}'...`);
-                          const addItemMutation = `
-                            mutation($projectId: ID!, $contentId: ID!) {
-                              addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                                item { 
-                                  id
-                                }
-                              }
-                            }
-                          `;
-
-                          const response = await github.graphql(addItemMutation, { projectId, contentId });
-                          existingItemId = response.addProjectV2ItemById.item.id;
-                          core.info(`Added PR #${prData.number} (${prData.title}) to project '${project.title}'.`);
                       }
 
-                      const updateStatusMutation = `
-                        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                          updateProjectV2ItemFieldValue(input: {
-                            projectId: $projectId,
-                            itemId: $itemId,
-                            fieldId: $fieldId,
-                            value: { singleSelectOptionId: $optionId }
-                          }) {
-                            projectV2Item { 
-                              id
-                            }
-                          }
-                        }
-                      `;
-
-                      try {
-                          await github.graphql(updateStatusMutation, {
-                              projectId,
-                              itemId: existingItemId,
-                              fieldId,
-                              optionId
-                          });
-                          core.info(`Updated PR #${prData.number} (${prData.title}) status to '${statusOption.name}' in project '${project.title}'.`);
-                      } catch (error) {
-                          core.setFailed(`Failed to update PR #${prData.number} (${prData.title}) status: ${error.message}`);
+                      if (errors.length > 0) {
+                          core.setFailed(`${errors.length} board update(s) failed:\n${errors.join('\n')}`);
                       }
