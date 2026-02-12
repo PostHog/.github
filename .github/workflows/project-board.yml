@@ -1,4 +1,4 @@
-# This workflow manages pull requests on project boards for the Feature Flags teams.
+# This workflow manages pull requests on project boards.
 # It uses a team-to-board mapping (TEAM_BOARDS) to route PRs to the correct boards.
 # When a member of a mapped team is added as a reviewer to a PR, the workflow will:
 # - Add the PR to that team's project board
@@ -18,7 +18,7 @@
 #   - Organization: Projects (read & write)
 #   - Organization: Members (read)
 
-name: Add PR to Feature Flags Project
+name: Add PR to Project Board
 
 # Each entry maps a GitHub team slug to a project board ID. When a member of the
 # team is requested as a reviewer, the PR is added to that team's board. The
