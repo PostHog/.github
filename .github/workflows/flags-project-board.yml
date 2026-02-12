@@ -1,5 +1,5 @@
 # This workflow manages pull requests on project boards for the Feature Flags teams.
-# It uses a team-to-board mapping (TEAM_BOARD_CONFIG) to route PRs to the correct boards.
+# It uses a team-to-board mapping (TEAM_BOARDS) to route PRs to the correct boards.
 # When a member of a mapped team is added as a reviewer to a PR, the workflow will:
 # - Add the PR to that team's project board
 # - Set the status of the PR to 'In Review'
@@ -20,28 +20,15 @@
 
 name: Add PR to Feature Flags Project
 
-# Each entry maps a GitHub team to a project board. When a member of the team is
-# requested as a reviewer, the PR is added to that team's board. The IDs require
-# using the GraphQL API to retrieve.
+# Each entry maps a GitHub team slug to a project board ID. When a member of the
+# team is requested as a reviewer, the PR is added to that team's board. The
+# workflow discovers the Status field and its "In Review" / "In Progress" options
+# by name at runtime.
 env:
     ORG_NAME: PostHog
-    TEAM_BOARD_CONFIG: |
-        [
-            {
-                "team_slug": "team-feature-flags",
-                "project_v2_id": "PVT_kwDOA5iQ-M4AroCF",
-                "status_field_id": "PVTSSF_lADOA5iQ-M4AroCFzgirkuw",
-                "in_review_option_id": "8d24d43c",
-                "in_progress_option_id": "f75ad846"
-            },
-            {
-                "team_slug": "team-flags-platform",
-                "project_v2_id": "PVT_kwDOA5iQ-M4BPB59",
-                "status_field_id": "PVTSSF_lADOA5iQ-M4BPB59zg9jxJs",
-                "in_review_option_id": "df73e18b",
-                "in_progress_option_id": "47fc9ee4"
-            }
-        ]
+    TEAM_BOARDS: |
+        team-feature-flags=PVT_kwDOA5iQ-M4AroCF
+        team-flags-platform=PVT_kwDOA5iQ-M4BPB59
 
 on:
     workflow_call:
@@ -127,7 +114,13 @@ jobs:
                   script: |
                       core.info('Event type: ' + context.eventName);
 
-                      const teamBoardConfig = JSON.parse(process.env.TEAM_BOARD_CONFIG);
+                      const teamBoardConfig = process.env.TEAM_BOARDS
+                          .trim().split('\n')
+                          .filter(line => line.trim() && !line.startsWith('#'))
+                          .map(line => {
+                              const [teamSlug, projectId] = line.trim().split('=');
+                              return { team_slug: teamSlug, project_v2_id: projectId };
+                          });
 
                       let pr, isDraft, nodeId;
 
@@ -228,23 +221,20 @@ jobs:
                           }
 
                           if (isTeamRequested || isMemberRequested) {
-                              let statusOptionId, statusName;
+                              let desiredStatus;
 
                               if (context.eventName === 'pull_request_review' && context.payload.review.state === 'changes_requested') {
-                                  statusOptionId = config.in_progress_option_id;
-                                  statusName = 'In Progress';
-                                  core.info(`Changes requested on PR #${prNumber}. Setting status to '${statusName}' on '${teamSlug}' board.`);
+                                  desiredStatus = 'In Progress';
+                                  core.info(`Changes requested on PR #${prNumber}. Setting status to '${desiredStatus}' on '${teamSlug}' board.`);
                               } else {
-                                  statusOptionId = isDraft ? config.in_progress_option_id : config.in_review_option_id;
-                                  statusName = isDraft ? 'In Progress' : 'In Review';
-                                  core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${statusName}'.`);
+                                  desiredStatus = isDraft ? 'In Progress' : 'In Review';
+                                  core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${desiredStatus}'.`);
                               }
 
                               matchingBoards.push({
                                   team_slug: teamSlug,
                                   project_v2_id: config.project_v2_id,
-                                  status_field_id: config.status_field_id,
-                                  status_option_id: statusOptionId
+                                  desired_status: desiredStatus
                               });
                           } else {
                               core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
@@ -291,11 +281,9 @@ jobs:
 
                       for (const board of matchingBoards) {
                           const projectId = board.project_v2_id;
-                          const fieldId = board.status_field_id;
-                          const optionId = board.status_option_id;
 
                           try {
-                              // Get project details to validate field and option IDs
+                              // Discover the Status field and desired option by name
                               const projectQuery = `
                                 query($projectId: ID!) {
                                   node(id: $projectId) {
@@ -320,17 +308,30 @@ jobs:
 
                               const projectResult = await github.graphql(projectQuery, { projectId });
                               const project = projectResult.node;
-                              const statusField = project.fields.nodes.find(f => f.id === fieldId);
 
+                              const statusField = project.fields.nodes.find(
+                                  f => f.name?.toLowerCase() === 'status'
+                              );
                               if (!statusField) {
-                                  throw new Error(`Could not find status field with ID ${fieldId} in project '${project.title}'.`);
+                                  throw new Error(
+                                      `No 'Status' field found in project '${project.title}'. ` +
+                                      `Available fields: ${project.fields.nodes.map(f => f.name).filter(Boolean).join(', ')}`
+                                  );
                               }
 
-                              const statusOption = statusField.options.find(o => o.id === optionId);
-
+                              const statusOption = statusField.options.find(
+                                  o => o.name?.toLowerCase() === board.desired_status.toLowerCase()
+                              );
                               if (!statusOption) {
-                                  throw new Error(`Could not find status option with ID ${optionId} in field '${statusField.name}'.`);
+                                  throw new Error(
+                                      `No '${board.desired_status}' option in Status field of project '${project.title}'. ` +
+                                      `Available options: ${statusField.options.map(o => o.name).join(', ')}`
+                                  );
                               }
+
+                              const fieldId = statusField.id;
+                              const optionId = statusOption.id;
+                              core.info(`Discovered Status field (ID: ${fieldId}) with option '${statusOption.name}' (ID: ${optionId}).`);
 
                               core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'…`);
 
