@@ -29,6 +29,7 @@ env:
     TEAM_BOARDS: |
         team-feature-flags=PVT_kwDOA5iQ-M4AroCF
         team-flags-platform=PVT_kwDOA5iQ-M4BPB59
+        clickhouse=PVT_kwDOA5iQ-M4ARqEU
 
 on:
     workflow_call:
