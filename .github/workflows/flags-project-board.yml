@@ -145,6 +145,7 @@ jobs:
                                 ... on PullRequest {
                                   id
                                   number
+                                  title
                                   isDraft
                                   repository {
                                     nameWithOwner
@@ -176,6 +177,7 @@ jobs:
 
                           pr = {
                               number: prData.number,
+                              title: prData.title,
                               draft: prData.isDraft,
                               node_id: nodeId,
                               base: { repo: { name: repo } },
@@ -244,7 +246,11 @@ jobs:
 
                       core.info(`Matched ${matchingBoards.length} board(s).`);
                       core.setOutput('has_matches', (matchingBoards.length > 0).toString());
-                      core.setOutput('matching_boards', JSON.stringify(matchingBoards));
+                      core.setOutput('matching_boards', JSON.stringify({
+                          boards: matchingBoards,
+                          pr_number: prNumber.toString(),
+                          pr_title: pr.title || `#${prNumber}`
+                      }));
                       core.setOutput('pr_node_id', nodeId);
             - name: Update Project Boards
               if: steps.check.outputs.has_matches == 'true'
@@ -255,28 +261,11 @@ jobs:
               with:
                   github-token: ${{ steps.app-token.outputs.token }}
                   script: |
-                      const matchingBoards = JSON.parse(process.env.MATCHING_BOARDS);
+                      const data = JSON.parse(process.env.MATCHING_BOARDS);
+                      const matchingBoards = data.boards;
                       const contentId = process.env.PR_NODE_ID;
-
-                      // Fetch PR details once for logging across all board updates
-                      const prQuery = `
-                        query($nodeId: ID!) {
-                          node(id: $nodeId) {
-                            ... on PullRequest {
-                              id
-                              number
-                              title
-                            }
-                          }
-                        }
-                      `;
-
-                      const prResult = await github.graphql(prQuery, { nodeId: contentId });
-                      const prData = prResult.node;
-
-                      if (!prData) {
-                          throw new Error(`Could not find PR with node ID: ${contentId}`);
-                      }
+                      const prNumber = data.pr_number;
+                      const prTitle = data.pr_title;
 
                       const errors = [];
 
@@ -334,7 +323,7 @@ jobs:
                               const optionId = statusOption.id;
                               core.info(`Discovered Status field (ID: ${fieldId}) with option '${statusOption.name}' (ID: ${optionId}).`);
 
-                              core.info(`Checking if PR #${prData.number} (${prData.title}) is already in project '${project.title}'…`);
+                              core.info(`Checking if PR #${prNumber} (${prTitle}) is already in project '${project.title}'…`);
 
                               // Unfortunately the GraphQL API doesn't allow filtering by content ID as part of the query.
                               const itemsQuery = `
@@ -361,9 +350,9 @@ jobs:
                               let existingItemId = items.find(item => item.content?.id === contentId)?.id || null;
 
                               if (existingItemId) {
-                                  core.info(`PR #${prData.number} (${prData.title}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'…`);
+                                  core.info(`PR #${prNumber} (${prTitle}) already exists in project '${project.title}'. Updating status to '${statusOption.name}'…`);
                               } else {
-                                  core.info(`Adding PR #${prData.number} (${prData.title}) to project '${project.title}'…`);
+                                  core.info(`Adding PR #${prNumber} (${prTitle}) to project '${project.title}'…`);
                                   const addItemMutation = `
                                     mutation($projectId: ID!, $contentId: ID!) {
                                       addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
@@ -376,7 +365,7 @@ jobs:
 
                                   const response = await github.graphql(addItemMutation, { projectId, contentId });
                                   existingItemId = response.addProjectV2ItemById.item.id;
-                                  core.info(`Added PR #${prData.number} (${prData.title}) to project '${project.title}'.`);
+                                  core.info(`Added PR #${prNumber} (${prTitle}) to project '${project.title}'.`);
                               }
 
                               const updateStatusMutation = `
@@ -400,7 +389,7 @@ jobs:
                                   fieldId,
                                   optionId
                               });
-                              core.info(`Updated PR #${prData.number} (${prData.title}) status to '${statusOption.name}' in project '${project.title}'.`);
+                              core.info(`Updated PR #${prNumber} (${prTitle}) status to '${statusOption.name}' in project '${project.title}'.`);
                           } catch (error) {
                               const msg = `Failed to update board for team '${board.team_slug}': ${error.message}`;
                               core.error(msg);
