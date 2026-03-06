@@ -1,0 +1,25 @@
+on:
+    pull_request:
+    merge_group:
+
+name: Semgrep Tests
+
+permissions:
+    contents: read
+
+env:
+    SEMGREP_ENABLE_VERSION_CHECK: 'false'
+
+jobs:
+    semgrep-test-rules:
+        runs-on: ubuntu-latest
+        container:
+            image: returntocorp/semgrep
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: Test custom Semgrep rules
+              run: |
+                  semgrep --test .semgrep/
