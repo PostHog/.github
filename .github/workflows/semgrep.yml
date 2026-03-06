@@ -1,11 +1,8 @@
 on:
-    push:
-        branches:
-            - main
     pull_request:
     merge_group:
 
-name: Security
+name: Semgrep
 
 permissions:
     contents: read
@@ -24,7 +21,6 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
-            # exclude all directories already scanned by other jobs
             - name: Run Semgrep
               run: |
                   semgrep \
@@ -35,4 +31,4 @@ jobs:
                     --error \
                     --metrics=off \
                     --verbose \
-                    .
+                    .github/
