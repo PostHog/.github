@@ -1,0 +1,34 @@
+on:
+    pull_request:
+    merge_group:
+
+name: Semgrep
+
+permissions:
+    contents: read
+
+env:
+    SEMGREP_ENABLE_VERSION_CHECK: 'false'
+
+jobs:
+    # scans GitHub Actions and other repo-wide config
+    semgrep:
+        runs-on: ubuntu-latest
+        container:
+            image: returntocorp/semgrep
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: Run Semgrep
+              run: |
+                  semgrep \
+                    --config "p/owasp-top-ten" \
+                    --config "p/security-audit" \
+                    --config "p/trailofbits" \
+                    --config "p/github-actions" \
+                    --error \
+                    --metrics=off \
+                    --verbose \
+                    .github/
