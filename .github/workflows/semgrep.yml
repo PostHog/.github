@@ -21,6 +21,13 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
+            - name: Checkout .github repo (for custom semgrep rules)
+              uses: actions/checkout@v6
+              with:
+                  repository: PostHog/.github
+                  path: dotgithub-repo
+                  sparse-checkout: .semgrep
+
             - name: Check for .github directory
               id: check
               run: |
@@ -32,7 +39,7 @@ jobs:
               if: steps.check.outputs.exists == 'true'
               run: |
                   semgrep \
-                    --config ".semgrep/rules/" \
+                    --config "dotgithub-repo/.semgrep/rules/" \
                     --config "p/owasp-top-ten" \
                     --config "p/security-audit" \
                     --config "p/trailofbits" \
