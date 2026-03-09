@@ -15,7 +15,7 @@ env:
 
 jobs:
     # scans GitHub Actions and other repo-wide config
-    semgrep:
+    semgrep-local:
         runs-on: ubuntu-latest
         container:
             image: returntocorp/semgrep
