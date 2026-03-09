@@ -24,6 +24,7 @@ jobs:
             - name: Run Semgrep
               run: |
                   semgrep \
+                    --config ".semgrep/rules/" \
                     --config "p/owasp-top-ten" \
                     --config "p/security-audit" \
                     --config "p/trailofbits" \
