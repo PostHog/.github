@@ -10,5 +10,5 @@ ignore_actions:
       ref: .*
     - name: PostHog/.*
       ref: .*
-    - name: posthog/shared-actions/.*
+    - name: posthog/.*
       ref: .*
