@@ -20,4 +20,4 @@ jobs:
                       actions/
                       github/
                       PostHog/
-                      posthog/shared-actions/
+                      posthog/
