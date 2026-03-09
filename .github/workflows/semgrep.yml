@@ -21,7 +21,15 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
+            - name: Check for .github directory
+              id: check
+              run: |
+                  if [ -d ".github/" ]; then
+                    echo "exists=true" >> "$GITHUB_OUTPUT"
+                  fi
+
             - name: Run Semgrep
+              if: steps.check.outputs.exists == 'true'
               run: |
                   semgrep \
                     --config ".semgrep/rules/" \
