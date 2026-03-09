@@ -110,6 +110,9 @@ jobs:
                   ORG_NAME: '${{ env.ORG_NAME }}'
                   PR_NODE_ID: ${{ inputs.pr_node_id }}
                   IS_DRAFT: ${{ inputs.is_draft }}
+                  PR_DATA: '${{ steps.get-pr.outputs.pr_data }}'
+                  GET_PR_NODE_ID: '${{ steps.get-pr.outputs.node_id }}'
+                  GET_PR_IS_DRAFT: '${{ steps.get-pr.outputs.is_draft }}'
               with:
                   github-token: ${{ steps.app-token.outputs.token }}
                   script: |
@@ -134,10 +137,10 @@ jobs:
                           isDraft = pr.draft;
                           nodeId = pr.node_id;
                       } else if (context.eventName === 'workflow_dispatch') {
-                          const prData = JSON.parse('${{ steps.get-pr.outputs.pr_data }}');
+                          const prData = JSON.parse(process.env.PR_DATA);
                           pr = prData;
-                          nodeId = '${{ steps.get-pr.outputs.node_id }}';
-                          isDraft = '${{ steps.get-pr.outputs.is_draft }}' === 'true';
+                          nodeId = process.env.GET_PR_NODE_ID;
+                          isDraft = process.env.GET_PR_IS_DRAFT === 'true';
                       } else if (context.eventName === 'workflow_call') {
                           const query = `
                             query($nodeId: ID!) {
