@@ -55,7 +55,7 @@ jobs:
 
       - name: Send Slack notification
         id: notify
-        uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
+        uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
         continue-on-error: true
         with:
           method: chat.postMessage
@@ -125,7 +125,7 @@ jobs:
 
       - name: Send Slack failure event to PostHog
         if: ${{ steps.notify.outcome == 'failure' }}
-        uses: PostHog/posthog-github-action@v0.1
+        uses: PostHog/posthog-github-action@v1.1.1
         with:
           posthog-token: "${{ secrets.posthog_project_api_key }}"
           event: "sdk-slack-notification-failure"
