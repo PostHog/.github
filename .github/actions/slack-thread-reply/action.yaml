@@ -18,10 +18,28 @@ inputs:
     description: "Emoji to react to the original message with (without colons), requires bot token to include `reactions:write` scope"
     required: false
     default: ""
+  remove_emoji_reaction:
+    description: "Emoji to remove from the original message (without colons), requires bot token to include `reactions:write` scope. Useful for removing failure emojis on retry success."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
   steps:
+    - name: Remove emoji reaction
+      if: ${{ inputs.remove_emoji_reaction != '' }}
+      continue-on-error: true # Don't fail if the emoji wasn't there
+      uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
+      with:
+        method: reactions.remove
+        token: ${{ inputs.slack_bot_token }}
+        payload: |
+          {
+            "channel": "${{ inputs.slack_channel_id }}",
+            "timestamp": "${{ inputs.thread_ts }}",
+            "name": "${{ inputs.remove_emoji_reaction }}"
+          }
+
     - name: Add emoji reaction
       if: ${{ inputs.emoji_reaction != '' }}
       uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
