@@ -84,7 +84,7 @@ const hasIssue =
     missing.length > 0 ||
     extra.length > 0 ||
     unknownDeclared.length > 0 ||
-    forbiddenMajorHits.length > 0;
+    noChangesetButPackagesModified;
 
 if (!hasIssue) {
     writeOutput('');
