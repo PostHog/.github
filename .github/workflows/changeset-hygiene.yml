@@ -1,0 +1,95 @@
+name: 'Changeset hygiene'
+
+on:
+    workflow_call:
+        inputs:
+            script-ref:
+                description: 'Ref of PostHog/.github to fetch the script from. Pin only for testing.'
+                required: false
+                type: string
+                default: 'main'
+
+permissions:
+    contents: read
+    pull-requests: write
+
+jobs:
+    check:
+        name: Check changeset hygiene
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout caller repository
+              uses: actions/checkout@v6
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  fetch-depth: 0
+
+            - name: Checkout PostHog/.github (for the script)
+              uses: actions/checkout@v6
+              with:
+                  repository: PostHog/.github
+                  ref: ${{ inputs.script-ref }}
+                  path: _shared
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # pin v4.2.0
+
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: '22'
+
+            - name: Compute hygiene report
+              id: hygiene
+              env:
+                  BASE_REF: ${{ github.event.pull_request.base.ref }}
+              run: node _shared/.github/scripts/check-changeset-coverage.mjs >> "$GITHUB_OUTPUT"
+
+            - name: Upsert or delete sticky PR comment
+              uses: actions/github-script@v7
+              env:
+                  COMMENT_BODY: ${{ steps.hygiene.outputs.body }}
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  script: |
+                      const marker = '<!-- changeset-hygiene -->';
+                      const body = process.env.COMMENT_BODY || '';
+
+                      const { data: comments } = await github.rest.issues.listComments({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: context.issue.number,
+                      });
+                      const existing = comments.find(
+                          (c) => c.user.type === 'Bot' && c.body.includes(marker),
+                      );
+
+                      if (!body) {
+                          if (existing) {
+                              await github.rest.issues.deleteComment({
+                                  owner: context.repo.owner,
+                                  repo: context.repo.repo,
+                                  comment_id: existing.id,
+                              });
+                              console.log('Deleted stale changeset-hygiene comment');
+                          }
+                          return;
+                      }
+
+                      if (existing) {
+                          await github.rest.issues.updateComment({
+                              owner: context.repo.owner,
+                              repo: context.repo.repo,
+                              comment_id: existing.id,
+                              body,
+                          });
+                          console.log('Updated existing changeset-hygiene comment');
+                      } else {
+                          await github.rest.issues.createComment({
+                              owner: context.repo.owner,
+                              repo: context.repo.repo,
+                              issue_number: context.issue.number,
+                              body,
+                          });
+                          console.log('Created changeset-hygiene comment');
+                      }
