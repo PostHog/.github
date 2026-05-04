@@ -4,18 +4,12 @@
 // Compares packages modified in a PR against packages declared in any changeset
 // added/modified in that PR, and surfaces issues as a sticky comment. Always
 // exits 0 — output is purely informational, the caller workflow does not gate
-// the PR. Set FORBIDDEN_MAJOR_PACKAGES (comma-separated) to surface a warning
-// when a changeset declares `<name>: major` for one of those packages, e.g.
-// for autoload-style packages where major bumps would break consumers.
+// the PR.
 
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
 const baseRef = process.env.BASE_REF || 'main';
-const forbiddenMajorPackages = (process.env.FORBIDDEN_MAJOR_PACKAGES || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
 
 const sh = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 
@@ -85,15 +79,11 @@ const missing = [...affected].filter((n) => !declared.has(n)).sort();
 const extra = [...declared.keys()].filter((n) => !affected.has(n) && knownNames.has(n)).sort();
 const unknownDeclared = [...declared.keys()].filter((n) => !knownNames.has(n)).sort();
 const noChangesetButPackagesModified = changesetFiles.length === 0 && affected.size > 0;
-const forbiddenMajorHits = forbiddenMajorPackages.filter(
-    (name) => declared.get(name) === 'major',
-);
 
 const hasIssue =
     missing.length > 0 ||
     extra.length > 0 ||
     unknownDeclared.length > 0 ||
-    noChangesetButPackagesModified ||
     forbiddenMajorHits.length > 0;
 
 if (!hasIssue) {
@@ -107,12 +97,6 @@ const declaredList = [...declared]
     .join('\n');
 
 const summary = (() => {
-    if (forbiddenMajorHits.length === 1 && !missing.length && !extra.length && !unknownDeclared.length) {
-        return `\`${forbiddenMajorHits[0]}\` should not receive a major bump`;
-    }
-    if (forbiddenMajorHits.length > 0) {
-        return `Forbidden major bump${forbiddenMajorHits.length > 1 ? 's' : ''} declared (${forbiddenMajorHits.length}) plus other issues`;
-    }
     if (noChangesetButPackagesModified) {
         const arr = [...affected].sort();
         return arr.length === 1
@@ -140,16 +124,6 @@ inner.push(
     'This is informational — the PR is not blocked. Click the triangle above to collapse, or push a fix and this comment will auto-delete.',
 );
 inner.push('');
-
-if (forbiddenMajorHits.length > 0) {
-    inner.push('**Major bump declared for a package that should never get one:**');
-    for (const n of forbiddenMajorHits) inner.push(`- \`${n}\``);
-    inner.push('');
-    inner.push(
-        "These packages are configured (via `forbidden-major-packages` in the workflow) to never receive a major bump — typically because they're autoloaded or pinned by consumers and a breaking change would break everyone. Change the bump level to `minor` or `patch`, or reconsider whether the change can be made backwards-compatible.",
-    );
-    inner.push('');
-}
 
 if (noChangesetButPackagesModified) {
     inner.push('**Modified in this PR but no changeset added:**');

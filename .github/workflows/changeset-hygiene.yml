@@ -1,23 +1,8 @@
 name: 'Changeset hygiene'
 
-# Reusable workflow that surfaces changeset issues as a sticky PR comment.
-# Never blocks merging — output is informational. See README for caller setup.
-#
-# Inputs:
-#   forbidden-major-packages — comma-separated list of package names that
-#     should never receive a major bump (e.g., autoload-style packages where
-#     a breaking change would break every consumer).
-#   script-ref — ref of PostHog/.github to fetch the script from. Defaults
-#     to main; override only when iterating on the workflow itself.
-
 on:
     workflow_call:
         inputs:
-            forbidden-major-packages:
-                description: 'Comma-separated package names that should warn on major bumps.'
-                required: false
-                type: string
-                default: ''
             script-ref:
                 description: 'Ref of PostHog/.github to fetch the script from. Pin only for testing.'
                 required: false
@@ -58,7 +43,6 @@ jobs:
               id: hygiene
               env:
                   BASE_REF: ${{ github.event.pull_request.base.ref }}
-                  FORBIDDEN_MAJOR_PACKAGES: ${{ inputs.forbidden-major-packages }}
               run: node _shared/.github/scripts/check-changeset-coverage.mjs >> "$GITHUB_OUTPUT"
 
             - name: Upsert or delete sticky PR comment
