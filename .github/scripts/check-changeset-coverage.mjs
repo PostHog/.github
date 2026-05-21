@@ -53,6 +53,34 @@ const changesetFiles = sh(
     .split('\n')
     .filter((f) => f.endsWith('.md') && !f.endsWith('README.md'));
 
+// 4.5. Optional per-repo hygiene config for transitive re-exports.
+//
+// Schema (.changeset/hygiene.json, all keys optional):
+//   {
+//     "transitiveReExports": {
+//       "<source-pkg>": ["<re-exporter-1>", "<re-exporter-2>"]
+//     }
+//   }
+//
+// When <source-pkg> has source changes AND is declared in a changeset on this
+// PR, declaring any of its re-exporters is treated as legitimate even if no
+// source files in that re-exporter changed. Use for cases the workspace graph
+// can't see — e.g. Gradle `api(project(":x"))` re-exports where a downstream
+// artifact must be republished to deliver an upstream core change to its own
+// consumers.
+let transitiveReExports = {};
+const hygieneConfigPath = '.changeset/hygiene.json';
+if (existsSync(hygieneConfigPath)) {
+    try {
+        const cfg = JSON.parse(readFileSync(hygieneConfigPath, 'utf8'));
+        if (cfg.transitiveReExports && typeof cfg.transitiveReExports === 'object') {
+            transitiveReExports = cfg.transitiveReExports;
+        }
+    } catch (e) {
+        process.stderr.write(`Could not parse ${hygieneConfigPath}: ${e.message}\n`);
+    }
+}
+
 const writeOutput = (body) => {
     if (!body) {
         process.stdout.write('body=\n');
@@ -75,8 +103,20 @@ for (const file of changesetFiles) {
 }
 
 // 6. Compare.
+//
+// Re-exporters whose upstream is properly declared with source changes are
+// excused from the "extra" check — they need a version bump to republish.
+const excusedExtras = new Set();
+for (const [source, reExporters] of Object.entries(transitiveReExports)) {
+    if (!affected.has(source) || !declared.has(source)) continue;
+    if (!Array.isArray(reExporters)) continue;
+    for (const r of reExporters) excusedExtras.add(r);
+}
+
 const missing = [...affected].filter((n) => !declared.has(n)).sort();
-const extra = [...declared.keys()].filter((n) => !affected.has(n) && knownNames.has(n)).sort();
+const extra = [...declared.keys()]
+    .filter((n) => !affected.has(n) && knownNames.has(n) && !excusedExtras.has(n))
+    .sort();
 const unknownDeclared = [...declared.keys()].filter((n) => !knownNames.has(n)).sort();
 const noChangesetButPackagesModified = changesetFiles.length === 0 && affected.size > 0;
 
