@@ -1,0 +1,127 @@
+# Mapping form with sub-config
+# ruleid: github-actions-pull-request-target
+on:
+    pull_request_target:
+        types: [opened, synchronize]
+
+name: pull_request_target with types
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Mapping form with empty value
+# ruleid: github-actions-pull-request-target
+on:
+    pull_request_target:
+
+name: pull_request_target empty
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Block list form
+# ruleid: github-actions-pull-request-target
+on:
+    - pull_request_target
+
+name: pull_request_target list
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Scalar form
+# ruleid: github-actions-pull-request-target
+on: pull_request_target
+
+name: pull_request_target scalar
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Combined with other triggers (mapping)
+# ruleid: github-actions-pull-request-target
+on:
+    push:
+        branches: [main]
+    pull_request_target:
+        types: [opened]
+
+name: combined triggers
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Combined with other triggers (mapping)
+# ruleid: github-actions-pull-request-target
+on:
+    pull_request_target:
+        types: [opened]
+    push:
+        branches: [main]
+
+name: combined triggers
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Negative: regular pull_request
+# ok: github-actions-pull-request-target
+on:
+    pull_request:
+        types: [opened]
+
+name: pull_request only (safe)
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Negative: workflow_run (different trigger, also potentially dangerous but not this rule)
+# ok: github-actions-pull-request-target
+on:
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
+
+name: workflow_run only
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hi
+---
+# Negative: word `pull_request_target` appearing in a non-trigger context should not match
+# ok: github-actions-pull-request-target
+on:
+    pull_request:
+
+name: pull_request_target as a step env value (not a trigger)
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo "$EVENT"
+              env:
+                  EVENT: pull_request_target
