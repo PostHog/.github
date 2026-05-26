@@ -23,10 +23,10 @@ rules:
           write permissions and secret access while exposing attacker-controlled PR metadata, and
           is a well-known source of remote code execution ("pwn requests") when combined with a
           checkout or build of the PR head. Prefer `pull_request`. If `pull_request_target` is
-          genuinely required (e.g. labeling, commenting, posting status to fork PRs), do NOT check
-          out `github.event.pull_request.head.*`, scope `permissions:` to the minimum needed, and
-          add a `# nosemgrep: github-actions-pull-request-target` line above with a justification
-          reviewed by the security team.
+          genuinely required (e.g. labeling, commenting, posting status to fork PRs), you MUST check
+          out `main`/`master` rather than `github.event.pull_request.head.*`, scope `permissions:`
+          to the minimum needed, and add a `# nosemgrep: github-actions-pull-request-target` line
+          above with a justification reviewed by the security team.
       metadata:
           category: security
           cwe:
