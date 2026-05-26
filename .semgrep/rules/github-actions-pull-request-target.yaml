@@ -1,0 +1,77 @@
+# Flags use of the `pull_request_target` trigger in GitHub Actions workflows.
+#
+# `pull_request_target` runs in the context of the BASE repository with full
+# write permissions and access to secrets, but `github.event.pull_request.*`
+# carries attacker-controlled values from the PR head. Any workflow that
+# subsequently checks out, builds, tests, or executes code referenced from
+# the PR head ref is vulnerable to "pwn requests" — arbitrary remote code
+# execution by anyone who can open a PR against the repo.
+#
+# Legitimate uses (labeling, commenting, status checks on fork PRs) exist
+# but are rare and high-risk. Prefer `pull_request`. If `pull_request_target`
+# is required, never check out `github.event.pull_request.head.*`, scope
+# `permissions:` to the minimum needed, and add a
+# `# nosemgrep: github-actions-pull-request-target` line immediately above
+# the trigger with a justification reviewed by the security team.
+rules:
+    - id: github-actions-pull-request-target
+      languages:
+          - yaml
+      severity: ERROR
+      message: >-
+          Workflow uses the `pull_request_target` trigger. This runs with the base repository's
+          write permissions and secret access while exposing attacker-controlled PR metadata, and
+          is a well-known source of remote code execution ("pwn requests") when combined with a
+          checkout or build of the PR head. Prefer `pull_request`. If `pull_request_target` is
+          genuinely required (e.g. labeling, commenting, posting status to fork PRs), you MUST check
+          out `main`/`master` rather than `github.event.pull_request.head.*`, scope `permissions:`
+          to the minimum needed, and add a `# nosemgrep: github-actions-pull-request-target` line
+          above with a justification reviewed by the security team.
+      metadata:
+          category: security
+          cwe:
+              - 'CWE-269: Improper Privilege Management'
+          owasp:
+              - A01:2021 - Broken Access Control
+          references:
+              - https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+              - https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
+              - https://www.legitsecurity.com/blog/github-actions-that-open-the-door-to-cicd-pipeline-attacks
+          technology:
+              - github-actions
+          subcategory:
+              - vuln
+          likelihood: HIGH
+          impact: HIGH
+          confidence: HIGH
+      paths:
+          include:
+              - '*.github/workflows/*.yml'
+              - '*.github/workflows/*.yaml'
+      patterns:
+          - pattern-either:
+                # Mapping form (with or without sibling triggers, with or without sub-config):
+                #   on:
+                #     push:
+                #       branches: [main]
+                #     pull_request_target:
+                #       types: [opened]
+                - pattern: |
+                      on:
+                        ...
+                        pull_request_target: ...
+                - pattern: |
+                      on:
+                        ...
+                        pull_request_target:
+                # Block list form (with or without sibling triggers):
+                #   on:
+                #     - push
+                #     - pull_request_target
+                - pattern: |
+                      on:
+                        - ...
+                        - pull_request_target
+                # Scalar form:
+                #   on: pull_request_target
+                - pattern: 'on: pull_request_target'
