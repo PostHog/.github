@@ -44,8 +44,6 @@ on:
                 description: 'Whether the pull request is in draft mode'
                 required: true
                 type: boolean
-    pull_request_review:
-        types: [submitted]
     workflow_dispatch:
         inputs:
             pr_number:
