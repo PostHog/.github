@@ -1,5 +1,7 @@
 # This workflow manages pull requests on project boards for the Feature Flags teams.
-# It uses a team-to-board mapping (TEAM_BOARDS) to route PRs to the correct boards.
+# It reads a team-to-board mapping from .github/flags-boards.json on the default
+# branch to route PRs to the correct boards. The mapping is loaded at runtime, so
+# editing the board list does not require callers to re-pin this workflow's SHA.
 # When a member of a mapped team is added as a reviewer to a PR, the workflow will:
 # - Add the PR to that team's project board
 # - Set the status of the PR to 'In Review'
@@ -14,21 +16,15 @@
 # Required GitHub App permissions:
 # - PROJECT_BOARD_BOT_APP_ID and PROJECT_BOARD_BOT_PRIVATE_KEY secrets
 # - App permissions needed:
+#   - Repository: Contents (read)        # to read .github/flags-boards.json
 #   - Repository: Pull requests (read)
 #   - Organization: Projects (read & write)
 #   - Organization: Members (read)
 
 name: Add PR to Feature Flags Project
 
-# Each entry maps a GitHub team slug to a project board ID. When a member of the
-# team is requested as a reviewer, the PR is added to that team's board. The
-# workflow discovers the Status field and its "In Review" / "In Progress" options
-# by name at runtime.
 env:
     ORG_NAME: PostHog
-    TEAM_BOARDS: |
-        team-feature-flags=PVT_kwDOA5iQ-M4AroCF
-        clickhouse=PVT_kwDOA5iQ-M4ARqEU
 
 on:
     workflow_call:
@@ -117,13 +113,21 @@ jobs:
                   script: |
                       core.info('Event type: ' + context.eventName);
 
-                      const teamBoardConfig = process.env.TEAM_BOARDS
-                          .trim().split('\n')
-                          .filter(line => line.trim() && !line.startsWith('#'))
-                          .map(line => {
-                              const [teamSlug, projectId] = line.trim().split('=');
-                              return { team_slug: teamSlug, project_v2_id: projectId };
-                          });
+                      // Load the team-to-board mapping from .github/flags-boards.json on the
+                      // default branch of PostHog/.github. Reading it at runtime (rather than
+                      // baking it into this file) means editing the board list does not change
+                      // this workflow's SHA, so callers never have to re-pin. The github context
+                      // points at the caller in a reusable workflow, so the repo is hardcoded.
+                      const { data: file } = await github.rest.repos.getContent({
+                          owner: process.env.ORG_NAME,
+                          repo: '.github',
+                          path: '.github/flags-boards.json'
+                      });
+                      const mapping = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+                      const teamBoardConfig = Object.entries(mapping).map(
+                          ([teamSlug, projectId]) => ({ team_slug: teamSlug, project_v2_id: projectId })
+                      );
+                      core.info(`Loaded ${teamBoardConfig.length} team-board mapping(s) from flags-boards.json.`);
 
                       let pr, isDraft, nodeId;
 
