@@ -13,7 +13,11 @@ env:
 jobs:
     # scans GitHub Actions and other repo-wide config
     semgrep:
-        runs-on: ubuntu-latest
+        # This workflow runs org-wide as a required workflow. Private/internal repos
+        # get the faster Depot runner; public repos stay on GitHub-hosted ubuntu-latest
+        # (free minutes, and not every public repo has Depot enabled). The repository
+        # context reflects the target repo, so this resolves per-repo automatically.
+        runs-on: ${{ github.event.repository.private && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
         container:
             image: semgrep/semgrep:1.163.0@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
 
