@@ -62,7 +62,11 @@ jobs:
         # the github.event_name is supposed to be `workflow_call`, but because this workflow lives in the special `.github` repository,
         # it preserves the original event name (e.g. pull_request).
         # This is a not well-documented special case.
-        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        # Dependabot-triggered runs execute in a restricted secret context with no
+        # access to PROJECT_BOARD_BOT_APP_ID / PRIVATE_KEY, so the token step below
+        # hard-fails ("'app-id' must be a non-empty string") on every dependency-bump
+        # PR. Skip them — dependency bumps don't belong on the feature flags board.
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && github.actor != 'dependabot[bot]'
         steps:
             - name: Generate GitHub App Token
               id: app-token
