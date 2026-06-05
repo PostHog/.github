@@ -9,6 +9,16 @@ on:
       slack_user_group_id:
         required: true
         type: string
+      tag_pattern:
+        description: "Tag glob used for the compare base."
+        required: false
+        type: string
+        default: "*"
+      tag_sort:
+        description: "Tag sort mode: creatordate or version."
+        required: false
+        type: string
+        default: "creatordate"
     secrets:
       slack_bot_token:
         required: true
@@ -25,32 +35,56 @@ jobs:
     outputs:
       slack_ts: ${{ steps.notify.outputs.ts }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
       - name: Get info
         id: get-info
         shell: bash
+        env:
+          DEFAULT_BRANCH_FALLBACK: ${{ github.event.repository.default_branch }}
+          REPOSITORY: ${{ github.repository }}
+          TAG_PATTERN: ${{ inputs.tag_pattern }}
+          TAG_SORT: ${{ inputs.tag_sort }}
         run: |
-          # Fetch all tags
-          git fetch --tags --force
+          set -euo pipefail
 
-          # Get the most recent tag (sorted by date, not version)
-          # Note: Use read instead of piping to head to avoid SIGPIPE (exit 141)
-          ALL_TAGS=$(git tag --sort=-creatordate)
-          read -r LATEST_TAG <<< "$ALL_TAGS"
+          repo_url="https://github.com/${REPOSITORY}.git"
+
+          case "$TAG_SORT" in
+            creatordate)
+              sort_arg="--sort=-creatordate"
+              ;;
+            version)
+              sort_arg="--sort=-version:refname"
+              ;;
+            *)
+              echo "::error::tag_sort must be 'creatordate' or 'version'"
+              exit 1
+              ;;
+          esac
+
+          tag_glob="${TAG_PATTERN:-*}"
+          tag_ref_pattern="refs/tags/$tag_glob"
+          LATEST_TAG=$(
+            git ls-remote --tags --refs "$sort_arg" "$repo_url" "$tag_ref_pattern" |
+              awk -F 'refs/tags/' 'NR == 1 { print $2 }'
+          )
 
           if [ -z "$LATEST_TAG" ]; then
-          echo "No tags found, using initial commit"
-          LATEST_TAG=$(git rev-list --max-parents=0 HEAD)
+            echo "No tags found for pattern '$tag_glob', using HEAD"
+            LATEST_TAG="HEAD"
           fi
 
           echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
-          # Get default branch from GitHub API
-          DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' | tr -d '\n')
+          DEFAULT_BRANCH="${DEFAULT_BRANCH_FALLBACK:-}"
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            DEFAULT_BRANCH=$(
+              git ls-remote --symref "$repo_url" HEAD |
+                awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }'
+            )
+          fi
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            DEFAULT_BRANCH="main"
+          fi
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Send Slack notification
