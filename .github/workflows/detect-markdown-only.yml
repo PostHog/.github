@@ -1,0 +1,41 @@
+name: Detect markdown-only changes
+
+on:
+    workflow_call:
+        outputs:
+            markdown_only:
+                description: Whether every changed file in the pull request ends in `.md`.
+                value: ${{ jobs.detect.outputs.markdown_only }}
+
+jobs:
+    detect:
+        name: Detect markdown-only changes
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            pull-requests: read
+        outputs:
+            markdown_only: ${{ steps.detect.outputs.markdown_only }}
+        steps:
+            - name: Detect markdown-only PR
+              id: detect
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  EVENT_NAME: ${{ github.event_name }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  REPOSITORY: ${{ github.repository }}
+              run: |
+                  set -euo pipefail
+
+                  if [ "$EVENT_NAME" != "pull_request" ] || [ -z "$PR_NUMBER" ]; then
+                    echo "markdown_only=false" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  markdown_only=$(
+                    gh api --paginate --slurp "repos/$REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" \
+                      | jq -r 'flatten | if length == 0 then "false" else (all(.[]; (.filename | test("\\.md$")) and ((has("previous_filename") | not) or (.previous_filename | test("\\.md$")))) | tostring) end'
+                  )
+
+                  echo "markdown_only=$markdown_only" >> "$GITHUB_OUTPUT"
+                  echo "markdown_only=$markdown_only"
