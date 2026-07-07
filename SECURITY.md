@@ -6,6 +6,6 @@ We always recommend using the latest version of PostHog to ensure you get all se
 
 ## Reporting a Vulnerability
 
-Please report security vulnerabilities to security@posthog.com.
+Please report security vulnerabilities to security-reports@posthog.com.
 
-We currently do not operate a bug bounty program, but we will generously reward you with merch for any actionable security vulnerabilities found.
+We currently operate a vulnerability disclosure program and reward valid, high quality reports with merch.
