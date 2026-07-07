@@ -44,6 +44,16 @@ on:
                 description: 'Whether the pull request is in draft mode'
                 required: true
                 type: boolean
+        # Declared so callers can pass exactly these instead of `secrets: inherit`.
+        # Optional to stay compatible with existing inherit callers and with
+        # restricted contexts (dependabot) where the org secrets are absent.
+        secrets:
+            PROJECT_BOARD_BOT_APP_ID:
+                description: 'GitHub App ID for the project board bot'
+                required: false
+            PROJECT_BOARD_BOT_PRIVATE_KEY:
+                description: 'GitHub App private key for the project board bot'
+                required: false
     workflow_dispatch:
         inputs:
             pr_number:
