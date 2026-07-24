@@ -46,8 +46,8 @@ rules:
           confidence: HIGH
       paths:
           include:
-              - '*.github/workflows/*.yml'
-              - '*.github/workflows/*.yaml'
+              - '/.github/workflows/*.yml'
+              - '/.github/workflows/*.yaml'
       patterns:
           - pattern-either:
                 # Mapping form (with or without sibling triggers, with or without sub-config):

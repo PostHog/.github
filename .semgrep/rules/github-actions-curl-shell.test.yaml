@@ -1,0 +1,33 @@
+name: GitHub Actions curl shell checks
+
+on: push
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                name: [one, two]
+        steps:
+            - name: Valid GitHub expression must parse without errors
+              run: echo "Running ${{ matrix.name }}"
+
+            - name: Safe curl usage
+              run: curl --fail --output tool.tar.gz https://example.com/tool.tar.gz
+
+            - name: Detect curl piped to Bash
+              # ruleid: github-actions-curl-pipe-shell
+              run: curl --fail https://example.com/install.sh | bash
+
+            - name: Detect wget piped to sh
+              # ruleid: github-actions-curl-pipe-shell
+              run: |
+                  wget -qO- https://example.com/install.sh |
+                    sh
+
+            - name: Detect evaluated curl response
+              # ruleid: github-actions-curl-eval
+              run: |
+                  SCRIPT=$(curl --fail https://example.com/install.sh)
+                  echo "${{ matrix.name }}"
+                  eval "$SCRIPT"
