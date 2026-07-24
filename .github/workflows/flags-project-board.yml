@@ -74,7 +74,7 @@ jobs:
         # This is a not well-documented special case.
         # Dependabot-triggered runs execute in a restricted secret context with no
         # access to PROJECT_BOARD_BOT_APP_ID / PRIVATE_KEY, so the token step below
-        # hard-fails ("'app-id' must be a non-empty string") on every dependency-bump
+        # hard-fails because the client ID is empty on every dependency-bump
         # PR. Skip them — dependency bumps don't belong on the feature flags board.
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && github.actor != 'dependabot[bot]'
         steps:
@@ -82,7 +82,7 @@ jobs:
               id: app-token
               uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
               with:
-                  app-id: ${{ secrets.PROJECT_BOARD_BOT_APP_ID }}
+                  client-id: ${{ secrets.PROJECT_BOARD_BOT_APP_ID }}
                   private-key: ${{ secrets.PROJECT_BOARD_BOT_PRIVATE_KEY }}
                   owner: ${{ env.ORG_NAME }}
             - name: Get PR Node ID for workflow_dispatch
