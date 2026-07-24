@@ -31,3 +31,15 @@ jobs:
                   SCRIPT=$(curl --fail https://example.com/install.sh)
                   echo "${{ matrix.name }}"
                   eval "$SCRIPT"
+
+            - name: Detect evaluated quoted curl response
+              # ruleid: github-actions-curl-eval
+              run: |
+                  SCRIPT="$(curl --fail https://example.com/install.sh)"
+                  eval "$SCRIPT"
+
+            - name: Detect evaluated backtick curl response
+              # ruleid: github-actions-curl-eval
+              run: |
+                  SCRIPT=`curl --fail https://example.com/install.sh`
+                  eval "$SCRIPT"

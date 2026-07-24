@@ -72,5 +72,5 @@ rules:
           - pattern: 'run: $SHELL'
           - metavariable-regex:
                 metavariable: $SHELL
-                regex: '(?s).*\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\$\([^)]*\bcurl\b[^)]*\).*?\beval\b[^\n]*\$\1.*'
+                regex: '(?s).*\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"?(?:\$\([^)]*\bcurl\b[^)]*\)|`[^`]*\bcurl\b[^`]*`)"?.*?\beval\b[^\n]*\$\1.*'
       severity: ERROR
