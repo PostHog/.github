@@ -43,3 +43,9 @@ jobs:
               run: |
                   SCRIPT=`curl --fail https://example.com/install.sh`
                   eval "$SCRIPT"
+
+            - name: Detect evaluated curl response with braced expansion
+              # ruleid: github-actions-curl-eval
+              run: |
+                  SCRIPT=$(curl --fail https://example.com/install.sh)
+                  eval "${SCRIPT}"
