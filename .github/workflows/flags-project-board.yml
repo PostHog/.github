@@ -68,6 +68,7 @@ on:
 jobs:
     add-to-project-board:
         runs-on: ubuntu-latest
+        timeout-minutes: 5
         # When the workflow is called via `workflow_call` (aka from another workflow via the uses: keyword), from another repository,
         # the github.event_name is supposed to be `workflow_call`, but because this workflow lives in the special `.github` repository,
         # it preserves the original event name (e.g. pull_request).

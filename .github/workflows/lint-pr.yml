@@ -11,6 +11,7 @@ jobs:
     lint-pr:
         name: Validate PR title against Conventional Commits
         runs-on: ubuntu-latest
+        timeout-minutes: 5
         permissions:
           pull-requests: read
         steps:
