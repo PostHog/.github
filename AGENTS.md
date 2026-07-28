@@ -15,6 +15,8 @@ There is no build step and no app. Changes are config (YAML workflows, semgrep r
 - **The doubled path.** Reusable workflows here are referenced as `PostHog/.github/.github/workflows/<name>.yml@main` — the `.github/.github/` is correct, not a typo.
 - **`workflow_call` preserves the original event.** When a workflow here is invoked via `workflow_call` from another repo, `github.event_name` keeps the *original* event (e.g. `pull_request`), not `workflow_call`. This is an undocumented special case of the `.github` repo; several workflows branch on it. Read the comments in `flags-project-board.yml` before "fixing" any event-name check.
 - **`flags-boards.json` is loaded at runtime**, not baked into the workflow SHA — so editing the team→board map doesn't require callers to re-pin.
+- **Semgrep's `--timeout` defaults to 5s per rule per file, and `--strict` turns a hit on that budget into a failed scan.** So a slow runner, not the code, decides the outcome. Any invocation pairing `--strict` (or `report-semgrep-results.py`, which fails on a non-empty `errors[]`) with the default budget is flaky by construction — pass a generous `--timeout` and let `timeout-minutes` catch a genuinely stuck rule.
+- **`--exclude-rule` takes exact rule IDs only.** No globs or prefixes: a pattern like `trailofbits.yaml.ansible.*` aborts the run with `Malformed_rule_ID`. Excluding a rule family means listing every member.
 
 ## Testing
 

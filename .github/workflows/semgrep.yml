@@ -20,7 +20,7 @@ jobs:
         runs-on: ${{ github.event.repository.private && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
         timeout-minutes: 15
         container:
-            image: semgrep/semgrep:1.163.0@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+            image: semgrep/semgrep:1.167.0@sha256:06938c1f365d3f67b8cedd8bc117607ae64253f88a0e768e9da9408548927dd6
 
         steps:
             - name: Checkout
@@ -45,12 +45,26 @@ jobs:
             - name: Run Semgrep
               id: semgrep
               if: steps.check.outputs.exists == 'true'
+              # continue-on-error keeps the reporting step below in charge of the job's outcome, at the cost
+              # of this step reporting green in the UI and the API even when Semgrep failed. When debugging a
+              # failed scan, read the check run's annotations rather than the step conclusions.
               continue-on-error: true
               run: |
-                  # These upstream rules reparse every run block as Bash and reject valid GitHub expressions.
-                  # Local generic-parser replacements preserve their coverage. Remove both exclusions and the
-                  # replacements after https://github.com/semgrep/semgrep-rules/issues/3688 is fixed and the
-                  # compatibility fixture passes with p/github-actions under --strict.
+                  # --strict fails the scan on any analysis error, including a rule that exceeds Semgrep's
+                  # per-rule-per-file time budget. That budget defaults to 5s, which is close enough to what
+                  # the slowest rules need on a large workflow file that a busy runner decides the outcome,
+                  # so pass a generous --timeout and let the job timeout catch a genuinely stuck rule.
+                  #
+                  # The first three github-actions exclusions are upstream rules that reparse every run block
+                  # as Bash and reject valid GitHub expressions. Local generic-parser replacements preserve
+                  # their coverage. Remove both exclusions and the replacements after
+                  # https://github.com/semgrep/semgrep-rules/issues/3688 is fixed and the compatibility
+                  # fixture passes with p/github-actions under --strict.
+                  #
+                  # The trailofbits Ansible rules only match Ansible playbooks, so they cannot produce a true
+                  # positive on the GitHub Actions workflows and config that make up .github/ — but they are
+                  # by far the most expensive rules here (~85% of this scan's wall clock on a large .github/
+                  # directory) and were the ones timing out. Drop them if a repo ever keeps playbooks here.
                   semgrep \
                     --config "dotgithub-repo/.semgrep/rules/" \
                     --config "p/owasp-top-ten" \
@@ -64,6 +78,23 @@ jobs:
                     --exclude-rule yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command \
                     --exclude-rule yaml.github-actions.security.curl-eval.curl-eval \
                     --exclude-rule yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell \
+                    --exclude-rule trailofbits.yaml.ansible.apt-key-unencrypted-url.apt-key-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.apt-key-validate-certs-disabled.apt-key-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.apt-unencrypted-url.apt-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.dnf-unencrypted-url.dnf-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.dnf-validate-certs-disabled.dnf-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.get-url-unencrypted-url.get-url-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.get-url-validate-certs-disabled.get-url-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.rpm-key-unencrypted-url.rpm-key-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.rpm-key-validate-certs-disabled.rpm-key-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.unarchive-unencrypted-url.unarchive-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.unarchive-validate-certs-disabled.unarchive-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.wrm-cert-validation-ignore.wrm-cert-validation-ignore \
+                    --exclude-rule trailofbits.yaml.ansible.yum-unencrypted-url.yum-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.yum-validate-certs-disabled.yum-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.zypper-repository-unencrypted-url.zypper-repository-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.zypper-unencrypted-url.zypper-unencrypted-url \
+                    --timeout 300 \
                     --error \
                     --strict \
                     --json-output "$RUNNER_TEMP/semgrep.json" \
