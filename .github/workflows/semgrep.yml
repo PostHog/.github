@@ -30,7 +30,9 @@ jobs:
               with:
                   repository: PostHog/.github
                   path: dotgithub-repo
-                  sparse-checkout: .semgrep
+                  sparse-checkout: |
+                      .semgrep
+                      .github/scripts
 
             - name: Check for .github directory
               id: check
@@ -40,8 +42,14 @@ jobs:
                   fi
 
             - name: Run Semgrep
+              id: semgrep
               if: steps.check.outputs.exists == 'true'
+              continue-on-error: true
               run: |
+                  # These upstream rules reparse every run block as Bash and reject valid GitHub expressions.
+                  # Local generic-parser replacements preserve their coverage. Remove both exclusions and the
+                  # replacements after https://github.com/semgrep/semgrep-rules/issues/3688 is fixed and the
+                  # compatibility fixture passes with p/github-actions under --strict.
                   semgrep \
                     --config "dotgithub-repo/.semgrep/rules/" \
                     --config "p/owasp-top-ten" \
@@ -53,7 +61,21 @@ jobs:
                     --exclude-rule trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport \
                     --exclude-rule trailofbits.yaml.docker-compose.port-all-interfaces.port-all-interfaces \
                     --exclude-rule yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command \
+                    --exclude-rule yaml.github-actions.security.curl-eval.curl-eval \
+                    --exclude-rule yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell \
                     --error \
+                    --strict \
+                    --json-output "$RUNNER_TEMP/semgrep.json" \
                     --metrics=off \
                     --verbose \
                     .github/
+
+            - name: Report Semgrep results
+              if: always() && steps.semgrep.outcome != 'skipped'
+              env:
+                  SEMGREP_OUTCOME: ${{ steps.semgrep.outcome }}
+              run: |
+                  python3 dotgithub-repo/.github/scripts/report-semgrep-results.py "$RUNNER_TEMP/semgrep.json"
+                  if [ "$SEMGREP_OUTCOME" != "success" ]; then
+                    exit 1
+                  fi

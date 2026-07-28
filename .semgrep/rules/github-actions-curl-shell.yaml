@@ -1,0 +1,76 @@
+# Compatibility replacements for the upstream curl-eval and
+# gha-curl-pipe-shell rules. The upstream rules parse every run block as Bash,
+# which raises PartialParsing for valid GitHub expressions such as ${{ ... }}.
+# Generic nested parsing keeps these checks active without rejecting expressions.
+# Remove this file when https://github.com/semgrep/semgrep-rules/issues/3688 is
+# fixed and the paired fixture passes against p/github-actions under --strict.
+rules:
+    - id: github-actions-curl-pipe-shell
+      languages:
+          - yaml
+      message: >-
+          A `run:` step pipes the output of `curl` or `wget` directly into a shell interpreter.
+          Download the file first, verify its checksum or signature, and then execute it.
+      metadata:
+          category: security
+          cwe:
+              - "CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"
+          references:
+              - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions
+              - https://www.idontplaydarts.com/2016/04/detecting-curl-pipe-bash-server-side/
+          technology:
+              - github-actions
+              - shell
+          subcategory:
+              - vuln
+          likelihood: MEDIUM
+          impact: HIGH
+          confidence: HIGH
+      patterns:
+          - pattern-inside: 'steps: [...]'
+          - pattern-inside: |
+                - run: ...
+                  ...
+          - pattern: 'run: $SHELL'
+          - metavariable-pattern:
+                language: generic
+                metavariable: $SHELL
+                patterns:
+                    - pattern-either:
+                          - pattern: curl ... | $CMD ...
+                          - pattern: wget ... | $CMD ...
+                    - metavariable-regex:
+                          metavariable: $CMD
+                          regex: '^(bash|sh|python3?|ruby|perl)$'
+      severity: ERROR
+
+    - id: github-actions-curl-eval
+      languages:
+          - yaml
+      message: >-
+          Data returned by `curl` is passed to `eval`. Avoid evaluating remote data. If this is
+          unavoidable, verify the downloaded content's checksum or signature first.
+      metadata:
+          category: security
+          cwe:
+              - "CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"
+          references:
+              - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions
+          technology:
+              - github-actions
+              - shell
+          subcategory:
+              - audit
+          likelihood: LOW
+          impact: HIGH
+          confidence: LOW
+      patterns:
+          - pattern-inside: 'steps: [...]'
+          - pattern-inside: |
+                - run: ...
+                  ...
+          - pattern: 'run: $SHELL'
+          - metavariable-regex:
+                metavariable: $SHELL
+                regex: '(?s).*\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"?(?:\$\([^)]*\bcurl\b[^)]*\)|`[^`]*\bcurl\b[^`]*`)"?.*?\beval\b[^\n]*\$(?:\1|\{\1\}).*'
+      severity: ERROR

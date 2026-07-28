@@ -32,6 +32,7 @@ jobs:
                     --config "p/security-audit" \
                     --config "p/trailofbits" \
                     --config "p/github-actions" \
+                    --exclude ".semgrep/rules/*.test.yaml" \
                     --error \
                     --metrics=off \
                     --verbose \
