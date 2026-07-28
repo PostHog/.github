@@ -32,6 +32,7 @@ Each rule has a paired `.test.yaml` fixture — update it when you touch a rule.
 - **No shell injection.** Never interpolate `${{ steps.*.outputs.* }}` or other untrusted values into a `run:`/`script:` block. Route through an `env:` var and reference `"$VAR"` double-quoted. The custom `github-actions-shell-injection` rule enforces this.
 - **`pull_request_target` is effectively banned** (`github-actions-pull-request-target` rule errors on it). If truly required: don't check out the PR head, scope `permissions:` minimally, and add a justified `# nosemgrep:` line reviewed by security.
 - Set explicit least-privilege `permissions:` on every workflow/job.
+- **Declare `timeout-minutes` on every job.** Without it a job inherits GitHub's 360-minute default, and a network hang then burns a runner for six hours before anything kills it — multiplied by every repo in the org, since these run as required workflows. Set a generous multiple of the job's normal runtime, not a tight bound.
 
 ## Keeping this file current
 

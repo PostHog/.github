@@ -37,6 +37,7 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       slack_ts: ${{ steps.notify.outputs.ts }}
     steps:
