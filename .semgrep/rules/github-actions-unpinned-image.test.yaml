@@ -1,0 +1,290 @@
+# container.image with no tag at all (resolves to :latest)
+on: push
+
+name: container image untagged
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ruleid: github-actions-unpinned-image
+            image: semgrep/semgrep
+        steps:
+            - run: echo hi
+---
+# container.image pinned to a tag only — tags are mutable
+on: push
+
+name: container image tag only
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ruleid: github-actions-unpinned-image
+            image: semgrep/semgrep:1.163.0
+            options: --cpus 1
+        steps:
+            - run: echo hi
+---
+# container.image pinned to :latest
+on: push
+
+name: container image latest
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ruleid: github-actions-unpinned-image
+            image: node:latest
+        steps:
+            - run: echo hi
+---
+# container.image quoted
+on: push
+
+name: container image quoted
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ruleid: github-actions-unpinned-image
+            image: 'ghcr.io/posthog/example:v1'
+        steps:
+            - run: echo hi
+---
+# container string shorthand
+on: push
+
+name: container shorthand
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        # ruleid: github-actions-unpinned-image
+        container: node:18-alpine
+        steps:
+            - run: echo hi
+---
+# services.<id>.image
+on: push
+
+name: services image
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        services:
+            redis:
+                # ruleid: github-actions-unpinned-image
+                image: redis:7
+            postgres:
+                # ruleid: github-actions-unpinned-image
+                image: postgres:16
+                env:
+                    POSTGRES_PASSWORD: postgres
+        steps:
+            - run: echo hi
+---
+# docker:// step reference with a tag
+on: push
+
+name: docker uses tag
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            # ruleid: github-actions-unpinned-image
+            - uses: docker://alpine:3.20
+---
+# docker:// step reference with no tag
+on: push
+
+name: docker uses untagged
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            # ruleid: github-actions-unpinned-image
+            - uses: docker://ghcr.io/posthog/example
+---
+# Docker container action referencing a registry image
+name: docker container action
+
+runs:
+    using: docker
+    # ruleid: github-actions-unpinned-image
+    image: docker://alpine:3.20
+---
+# Negative: container.image pinned to a digest
+on: push
+
+name: container image digest pinned
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ok: github-actions-unpinned-image
+            image: semgrep/semgrep:1.163.0@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+        steps:
+            - run: echo hi
+---
+# Negative: container.image digest without a tag is still immutable
+on: push
+
+name: container image bare digest
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ok: github-actions-unpinned-image
+            image: semgrep/semgrep@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+        steps:
+            - run: echo hi
+---
+# Negative: container string shorthand pinned to a digest
+on: push
+
+name: container shorthand digest pinned
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        # ok: github-actions-unpinned-image
+        container: node:18-alpine@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+        steps:
+            - run: echo hi
+---
+# Negative: services images pinned to a digest
+on: push
+
+name: services image digest pinned
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        services:
+            redis:
+                # ok: github-actions-unpinned-image
+                image: redis:7@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+        steps:
+            - run: echo hi
+---
+# Negative: docker:// reference pinned to a digest
+on: push
+
+name: docker uses digest pinned
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            # ok: github-actions-unpinned-image
+            - uses: docker://alpine@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+---
+# Negative: ordinary action references are covered by the SHA-pinning rules, not this one
+on: push
+
+name: action references
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            # ok: github-actions-unpinned-image
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+            # ok: github-actions-unpinned-image
+            - uses: ./.github/actions/slack-thread-reply
+---
+# Negative: `image` as an action input, not a job container
+on: push
+
+name: image as action input
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: docker/build-push-action@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.18.0
+              with:
+                  # ok: github-actions-unpinned-image
+                  image: ghcr.io/posthog/example:latest
+---
+# Negative: a Docker action that builds from a local Dockerfile pins nothing remote
+name: dockerfile action
+
+runs:
+    using: docker
+    # ok: github-actions-unpinned-image
+    image: Dockerfile
+---
+# Negative: the image is supplied by the caller, which is where the pin belongs
+on:
+    workflow_call:
+        inputs:
+            container-image:
+                type: string
+                required: true
+
+name: caller supplied image
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        container:
+            # ok: github-actions-unpinned-image
+            image: ${{ inputs.container-image }}
+        services:
+            # Same exclusion without the surrounding whitespace, so that the two
+            # spellings of an expression behave identically.
+            redis:
+                # ok: github-actions-unpinned-image
+                image: ghcr.io/posthog/redis:${{inputs.tag}}
+        steps:
+            - run: echo hi
+---
+# Negative: `container` as an action input, not a job container
+on: push
+
+name: container as action input
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: azure/cli@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v2.1.0
+              with:
+                  # ok: github-actions-unpinned-image
+                  container: my-app-container
+---
+# Negative: `container` as an env var name
+on: push
+
+name: container as env var
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        env:
+            # ok: github-actions-unpinned-image
+            container: some-value:v1
+        steps:
+            - run: echo hi
+---
+# Negative: image references inside a run block are not job containers
+on: push
+
+name: image name in run block
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            # ok: github-actions-unpinned-image
+            - run: docker run --rm alpine:3.20 echo hi
