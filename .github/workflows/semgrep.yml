@@ -51,12 +51,15 @@ jobs:
                   # Local generic-parser replacements preserve their coverage. Remove both exclusions and the
                   # replacements after https://github.com/semgrep/semgrep-rules/issues/3688 is fixed and the
                   # compatibility fixture passes with p/github-actions under --strict.
+                  # Registry packs are pinned as snapshots in PostHog/.github
+                  # (.semgrep/registry/, refreshed by the semgrep-registry-update
+                  # workflow) so registry-side rule changes can't break CI here.
                   semgrep \
                     --config "dotgithub-repo/.semgrep/rules/" \
-                    --config "p/owasp-top-ten" \
-                    --config "p/security-audit" \
-                    --config "p/trailofbits" \
-                    --config "p/github-actions" \
+                    --config "dotgithub-repo/.semgrep/registry/owasp-top-ten.yaml" \
+                    --config "dotgithub-repo/.semgrep/registry/security-audit.yaml" \
+                    --config "dotgithub-repo/.semgrep/registry/trailofbits.yaml" \
+                    --config "dotgithub-repo/.semgrep/registry/github-actions.yaml" \
                     --exclude-rule trailofbits.generic.curl-unencrypted-url.curl-unencrypted-url \
                     --exclude-rule dockerfile.security.no-sudo-in-dockerfile.no-sudo-in-dockerfile \
                     --exclude-rule trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport \

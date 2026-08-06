@@ -19,21 +19,26 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         container:
-            image: semgrep/semgrep
+            image: semgrep/semgrep:1.163.0@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
 
         steps:
             - name: Checkout
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+            # Registry packs are pinned as snapshots in .semgrep/registry/
+            # (refreshed by the semgrep-registry-update workflow), which is
+            # also excluded from the scan target — vendored upstream rule
+            # files aren't ours to lint.
             # exclude all directories already scanned by other jobs
             - name: Run Semgrep
               run: |
                   semgrep \
-                    --config "p/owasp-top-ten" \
-                    --config "p/security-audit" \
-                    --config "p/trailofbits" \
-                    --config "p/github-actions" \
+                    --config ".semgrep/registry/owasp-top-ten.yaml" \
+                    --config ".semgrep/registry/security-audit.yaml" \
+                    --config ".semgrep/registry/trailofbits.yaml" \
+                    --config ".semgrep/registry/github-actions.yaml" \
                     --exclude ".semgrep/rules/*.test.yaml" \
+                    --exclude ".semgrep/registry" \
                     --error \
                     --metrics=off \
                     --verbose \

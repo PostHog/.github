@@ -15,14 +15,17 @@ There is no build step and no app. Changes are config (YAML workflows, semgrep r
 - **The doubled path.** Reusable workflows here are referenced as `PostHog/.github/.github/workflows/<name>.yml@main` — the `.github/.github/` is correct, not a typo.
 - **`workflow_call` preserves the original event.** When a workflow here is invoked via `workflow_call` from another repo, `github.event_name` keeps the *original* event (e.g. `pull_request`), not `workflow_call`. This is an undocumented special case of the `.github` repo; several workflows branch on it. Read the comments in `flags-project-board.yml` before "fixing" any event-name check.
 - **`flags-boards.json` is loaded at runtime**, not baked into the workflow SHA — so editing the team→board map doesn't require callers to re-pin.
+- **Registry rules are pinned as snapshots.** Scan workflows must never use live `--config p/...` / `--config r/...` registry configs — they resolve at scan time, so a registry-side rule change breaks CI org-wide with no code change. Instead, packs are vendored under `.semgrep/registry/` (generated files — don't hand-edit) and workflows point at those. The `semgrep-registry-update` workflow re-fetches on a schedule, dry-runs added/changed rules against `PostHog/posthog`, notifies Slack, and opens a snapshot-bump PR; *merging that PR is the moment new rules start being enforced*. To add a pack, add it to `.semgrep/registry/sources.json` and run `python3 .github/scripts/semgrep_registry.py sync`. Like `flags-boards.json`, snapshots load from `main` at runtime, so merging applies org-wide without re-pinning.
 
 ## Testing
 
 No general test suite. The one locally runnable thing is the semgrep rule tests:
 
 ```bash
-semgrep --test .semgrep/
+semgrep --test .semgrep/rules/
 ```
+
+(Scoped to `rules/` — `.semgrep/registry/` holds vendored registry snapshots with no test fixtures.)
 
 Each rule has a paired `.test.yaml` fixture — update it when you touch a rule. Workflows themselves can't be unit-tested; reusable workflows expose a `script-ref` / ref input (default `main`) so you can point a caller at a branch of this repo while iterating against a real PR.
 
