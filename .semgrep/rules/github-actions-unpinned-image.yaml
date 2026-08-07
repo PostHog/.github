@@ -1,0 +1,107 @@
+# Flags container images in GitHub Actions that are not pinned to a digest.
+#
+# GitHub's "require actions to be pinned to a full-length commit SHA" policy
+# covers `uses:` action references only. It explicitly does not cover registry
+# images — see the "Docker Hub and GitHub Packages Container registry URLs are
+# currently not supported" note in the secure-use reference. So `container:`,
+# `services:`, and `docker://` references have no platform-level enforcement
+# and need a lint rule instead.
+#
+# Tags are mutable: whoever controls the repository (or anyone who compromises
+# their registry credentials) can repoint `semgrep/semgrep:1.163.0` at a new
+# manifest, and every job that pulls it executes the new code with whatever
+# secrets and permissions the workflow holds. A `@sha256:` digest is content
+# addressed and cannot be repointed.
+#
+# Pin with `name:tag@sha256:<digest>` — keep the tag for readability, the digest
+# is what's enforced. Resolve one with:
+#
+#     docker buildx imagetools inspect semgrep/semgrep:1.163.0 --format '{{.Manifest.Digest}}'
+#
+# A `${{ ... }}` value is not flagged: the image is chosen by the caller, so the
+# pin belongs at the call site. Nor is `image: Dockerfile` in a Docker action,
+# which builds locally rather than pulling.
+rules:
+    - id: github-actions-unpinned-image
+      languages:
+          - yaml
+      severity: ERROR
+      message: >-
+          Container image is not pinned to a `@sha256:` digest. Tags are mutable, so the image this
+          job pulls can be replaced after review with code that runs against the workflow's secrets
+          and permissions. Pin to `name:tag@sha256:<digest>`, resolving the digest with
+          `docker buildx imagetools inspect <name>:<tag> --format '{{.Manifest.Digest}}'`. GitHub's
+          SHA-pinning policy does not cover registry images, so this is the only enforcement.
+      metadata:
+          category: security
+          cwe:
+              - "CWE-1357: Reliance on Insufficiently Trustworthy Component"
+          owasp:
+              - A08:2021 - Software and Data Integrity Failures
+          references:
+              - https://docs.github.com/en/actions/reference/security/secure-use
+              - https://docs.github.com/en/actions/using-jobs/running-jobs-in-a-container
+              - https://slsa.dev/spec/v1.0/threats#e-compromise-package-repo
+          technology:
+              - github-actions
+              - docker
+          subcategory:
+              - audit
+          likelihood: MEDIUM
+          impact: HIGH
+          confidence: HIGH
+      paths:
+          include:
+              - '/.github/workflows/*.yml'
+              - '/.github/workflows/*.yaml'
+              - 'action.yml'
+              - 'action.yaml'
+      pattern-either:
+          # jobs.<id>.container.image
+          - patterns:
+                - pattern-inside: |
+                      container:
+                        ...
+                - pattern: 'image: $IMG'
+                - metavariable-regex:
+                      metavariable: $IMG
+                      regex: '^["'']?(?!.*\$\{\{)(?![^"''\s]*@sha256:[0-9a-fA-F]{64})[^"''\s]+["'']?$'
+          # jobs.<id>.services.<id>.image
+          - patterns:
+                - pattern-inside: |
+                      services:
+                        ...
+                - pattern: 'image: $IMG'
+                - metavariable-regex:
+                      metavariable: $IMG
+                      regex: '^["'']?(?!.*\$\{\{)(?![^"''\s]*@sha256:[0-9a-fA-F]{64})[^"''\s]+["'']?$'
+          # jobs.<id>.container string shorthand. A sibling `runs-on:` is what
+          # makes this a job definition rather than an action input or an env
+          # var that happens to be named `container`, both of which are common
+          # enough to matter. The metavariable-regex then rejects the mapping
+          # form, whose $IMG binds to a block rather than to an image ref.
+          - patterns:
+                - pattern-either:
+                      - pattern: |
+                            runs-on: ...
+                            ...
+                            container: $IMG
+                      - pattern: |
+                            container: $IMG
+                            ...
+                            runs-on: ...
+                - focus-metavariable: $IMG
+                - metavariable-regex:
+                      metavariable: $IMG
+                      regex: '^["'']?(?!.*\$\{\{)(?![^"''\s]*@sha256:[0-9a-fA-F]{64})[^"''\s]+["'']?$'
+          # `uses: docker://...` steps, and `runs.image` in a Docker container
+          # action. Both name a registry image rather than an action repo, so
+          # neither is covered by the SHA-pinning policy or by the rules that
+          # enforce it for `uses:`.
+          - patterns:
+                - pattern-either:
+                      - pattern: 'uses: $IMG'
+                      - pattern: 'image: $IMG'
+                - metavariable-regex:
+                      metavariable: $IMG
+                      regex: '^["'']?docker://(?![^"''\s]*@sha256:[0-9a-fA-F]{64})'

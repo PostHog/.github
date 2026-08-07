@@ -29,6 +29,7 @@ Each rule has a paired `.test.yaml` fixture — update it when you touch a rule.
 ## Conventions (enforced, match them)
 
 - **Pin every action to a full commit SHA** with a trailing `# vX.Y.Z` comment — third-party *and* first-party `PostHog/*`.
+- **Pin every container image to a digest** — `name:tag@sha256:<digest>` for `container:`, `services:`, and `docker://` refs. GitHub's SHA-pinning policy covers `uses:` action refs only and explicitly excludes registry images, so the custom `github-actions-unpinned-image` rule is the only enforcement. Resolve a digest with `docker buildx imagetools inspect <name>:<tag> --format '{{.Manifest.Digest}}'`.
 - **No shell injection.** Never interpolate `${{ steps.*.outputs.* }}` or other untrusted values into a `run:`/`script:` block. Route through an `env:` var and reference `"$VAR"` double-quoted. The custom `github-actions-shell-injection` rule enforces this.
 - **`pull_request_target` is effectively banned** (`github-actions-pull-request-target` rule errors on it). If truly required: don't check out the PR head, scope `permissions:` minimally, and add a justified `# nosemgrep:` line reviewed by security.
 - Set explicit least-privilege `permissions:` on every workflow/job.
