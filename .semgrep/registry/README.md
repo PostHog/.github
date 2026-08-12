@@ -8,9 +8,18 @@ merged here.
 
 - `sources.json` maps each snapshot file to the registry config(s) it pins.
 - Every `*.yaml` file is generated — do not edit by hand. Refresh with
-  `python3 .github/scripts/semgrep_registry.py sync`; the
-  `semgrep-registry-update` workflow does this on a schedule and opens a PR
-  with a diff summary and a dry run against `PostHog/posthog`.
+  `python3 .github/scripts/semgrep_registry.py sync`, run inside the pinned
+  semgrep container image (which ships the script's ruamel.yaml dependency
+  and keeps the output byte-stable across environments):
+
+  ```bash
+  docker run --rm -v "$PWD:/src" -w /src \
+    "$(grep -om1 'semgrep/semgrep:[^ ]*' .github/workflows/semgrep-tests.yml)" \
+    python3 .github/scripts/semgrep_registry.py sync
+  ```
+
+  The `semgrep-registry-update` workflow does this on a schedule and opens a
+  PR with a diff summary and a dry run against critical repos.
 
 The rules remain the property of their upstream authors (Semgrep, Trail of
 Bits, and other registry contributors) under their respective licenses; each

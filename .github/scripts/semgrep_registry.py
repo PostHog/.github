@@ -18,6 +18,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
 import time
@@ -26,7 +27,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-import yaml
+# ruamel.yaml rather than PyYAML: it is a core dependency of semgrep itself,
+# so it is guaranteed inside the semgrep container images this script runs in
+# (PyYAML was dropped from the image in 1.172.0). It is also the canonical
+# serializer for the snapshots — regenerate them inside the pinned semgrep
+# image, not with a locally installed YAML library, to keep output stable.
+from ruamel.yaml import YAML
 
 SEMGREP_URL = "https://semgrep.dev"
 FETCH_ATTEMPTS = 3
@@ -38,6 +44,24 @@ GENERATED_HEADER = (
     "# and sorted. Refresh with: python3 .github/scripts/semgrep_registry.py sync\n"
     "# (the semgrep-registry-update workflow does this on a schedule).\n"
 )
+
+
+def _yaml() -> YAML:
+    parser = YAML(typ="safe", pure=True)
+    parser.default_flow_style = False
+    parser.allow_unicode = True
+    parser.width = 120
+    return parser
+
+
+def load_yaml(text: str) -> Any:
+    return _yaml().load(text)
+
+
+def dump_yaml(data: Any) -> str:
+    buffer = io.StringIO()
+    _yaml().dump(data, buffer)
+    return buffer.getvalue()
 
 
 def fetch_registry_rules(registry_id: str, urlopen: Callable[..., Any] = urllib.request.urlopen) -> list[dict[str, Any]]:
@@ -58,7 +82,7 @@ def fetch_registry_rules(registry_id: str, urlopen: Callable[..., Any] = urllib.
     else:
         raise RuntimeError(f"Could not fetch {url} after {FETCH_ATTEMPTS} attempts: {last_error}")
 
-    data = yaml.safe_load(raw)
+    data = load_yaml(raw)
     if not isinstance(data, dict) or not isinstance(data.get("rules"), list):
         raise RuntimeError(f"Unexpected response from {url}: no top-level 'rules' list")
     rules = data["rules"]
@@ -79,20 +103,14 @@ def merge_rules(rule_lists: list[list[dict[str, Any]]]) -> dict[str, dict[str, A
 
 def render_snapshot(sources: list[str], rules_by_id: dict[str, dict[str, Any]]) -> str:
     header = GENERATED_HEADER.format(sources=", ".join(sources))
-    body = yaml.safe_dump(
-        {"rules": [rules_by_id[rule_id] for rule_id in sorted(rules_by_id)]},
-        sort_keys=False,
-        default_flow_style=False,
-        allow_unicode=True,
-        width=120,
-    )
+    body = dump_yaml({"rules": [rules_by_id[rule_id] for rule_id in sorted(rules_by_id)]})
     return header + body
 
 
 def load_snapshot(path: Path) -> dict[str, dict[str, Any]]:
     if not path.is_file():
         return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = load_yaml(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not isinstance(data.get("rules"), list):
         raise RuntimeError(f"Existing snapshot {path} is not a valid rules file")
     return {rule["id"]: rule for rule in data["rules"]}
@@ -159,10 +177,7 @@ def changed_rules(registry_dir: Path, summary_path: Path, out_path: Path) -> int
                 raise RuntimeError(f"Rule {rule_id} from summary is missing in snapshot {name}.yaml")
             rules.append(snapshot[rule_id])
             seen.add(rule_id)
-    out_path.write_text(
-        yaml.safe_dump({"rules": rules}, sort_keys=False, default_flow_style=False, allow_unicode=True, width=120),
-        encoding="utf-8",
-    )
+    out_path.write_text(dump_yaml({"rules": rules}), encoding="utf-8")
     print(f"Wrote {len(rules)} added/changed rule(s) to {out_path}", file=sys.stderr)
     print(len(rules))
     return len(rules)

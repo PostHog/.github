@@ -20,7 +20,7 @@ jobs:
         runs-on: ${{ github.event.repository.private && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
         timeout-minutes: 15
         container:
-            image: semgrep/semgrep:1.163.0@sha256:7cad2bc2d1e44f87f0bf4be6d1fa23aa90fb72015bebc89fb91385d813987a03
+            image: semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b
 
         steps:
             - name: Checkout

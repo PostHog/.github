@@ -5,6 +5,45 @@
 # (the semgrep-registry-update workflow does this on a schedule).
 rules:
 - id: package_managers.bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age
+  languages:
+  - generic
+  message: 'This bunfig.toml does not set a minimum release age or sets it too low. Newly published packages can be malicious
+    or unstable. Add `minimumReleaseAge = 604800` under the `[install]` section to wait 7 days before resolving newly published
+    package versions. Added in: v1.3 Reference: https://bun.sh/docs/runtime/bunfig'
+  metadata:
+    category: security
+    confidence: HIGH
+    cwe:
+    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
+    owasp:
+    - A08:2021 - Software and Data Integrity Failures
+    references:
+    - https://bun.sh/docs/runtime/bunfig
+    semgrep.dev:
+      rule:
+        origin: community
+        r_id: 291646
+        rule_id: oqUyJOb
+        rv_id: 1423385
+        url: 
+          https://semgrep.dev/playground/r/BjTyRe5/package_managers.bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age
+        version_id: BjTyRe5
+    shortlink: https://sg.run/JqPrR
+    source: https://semgrep.dev/r/package_managers.bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age
+    subcategory:
+    - audit
+    technology:
+    - bun
+    - javascript
+    vulnerability_class:
+    - Insecure Configuration
+  paths:
+    include:
+    - '**/bunfig.toml'
+    - '**/.bunfig.toml'
   pattern-either:
   - patterns:
     - pattern-regex: (?ms)\[install\](?P<TARGET>[^\[]*?)(?=\[|\z)
@@ -16,54 +55,54 @@ rules:
     - pattern-regex: minimumReleaseAge\s*=\s*\d+
     - pattern-regex: =\s*(?P<AGE>\d+)
     - metavariable-comparison:
-        metavariable: $AGE
         comparison: int($AGE) < 604800
+        metavariable: $AGE
     - focus-metavariable: $AGE
   - patterns:
     - pattern-regex: (?m)minimumReleaseAge[ \t]*=[ \t]*(?P<VAL>[^\s\d][^\n]*)
     - focus-metavariable: $VAL
   - patterns:
     - pattern-regex: (?m)minimumReleaseAge\s*=\s*$
-  message: 'This bunfig.toml does not set a minimum release age or sets it too low. Newly published packages can be malicious
-    or unstable. Add `minimumReleaseAge = 604800` under the `[install]` section to wait 7 days before resolving newly published
-    package versions. Added in: v1.3 Reference: https://bun.sh/docs/runtime/bunfig'
-  languages:
-  - generic
   severity: MEDIUM
-  paths:
-    include:
-    - '**/bunfig.toml'
-    - '**/.bunfig.toml'
+- id: package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown
+  languages:
+  - yaml
+  message: 'This Dependabot configuration does not set a cooldown period. Newly published packages can be malicious or unstable.
+    Add a `cooldown` block with `default-days: 7` to each `package-ecosystem` entry under `updates` to wait 7 days before
+    proposing updates to newly published package versions. Reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#cooldown'
   metadata:
     category: security
-    technology:
-    - bun
-    - javascript
+    confidence: HIGH
     cwe:
     - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
     owasp:
     - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
     references:
-    - https://bun.sh/docs/runtime/bunfig
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age
-    shortlink: https://sg.run/JqPrR
+    - https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#cooldown
     semgrep.dev:
       rule:
-        r_id: 291646
-        rv_id: 1423385
-        rule_id: oqUyJOb
-        version_id: BjTyRe5
-        url: https://semgrep.dev/playground/r/BjTyRe5/package_managers.bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age
         origin: community
-- id: package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown
+        r_id: 291647
+        rule_id: zdUArOL
+        rv_id: 1423386
+        url: 
+          https://semgrep.dev/playground/r/DkTwEGl/package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown
+        version_id: DkTwEGl
+    shortlink: https://sg.run/5WvGK
+    source: https://semgrep.dev/r/package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown
+    subcategory:
+    - audit
+    technology:
+    - dependabot
+    vulnerability_class:
+    - Insecure Configuration
+  paths:
+    include:
+    - '**/.github/dependabot.yml'
+    - '**/.github/dependabot.yaml'
   pattern-either:
   - patterns:
     - pattern-inside: "updates:\n  ...\n"
@@ -73,8 +112,8 @@ rules:
     - pattern-inside: "updates:\n  ...\n"
     - pattern-regex: default-days\s*:\s*(?P<DAYS>\d+)
     - metavariable-comparison:
-        metavariable: $DAYS
         comparison: int($DAYS) < 7
+        metavariable: $DAYS
     - focus-metavariable: $DAYS
   - patterns:
     - pattern-inside: "updates:\n  ...\n"
@@ -83,45 +122,47 @@ rules:
         metavariable: $DAYS
         regex: ^\D
     - focus-metavariable: $DAYS
-  message: 'This Dependabot configuration does not set a cooldown period. Newly published packages can be malicious or unstable.
-    Add a `cooldown` block with `default-days: 7` to each `package-ecosystem` entry under `updates` to wait 7 days before
-    proposing updates to newly published package versions. Reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#cooldown'
-  languages:
-  - yaml
   severity: MEDIUM
-  paths:
-    include:
-    - '**/.github/dependabot.yml'
-    - '**/.github/dependabot.yaml'
+- id: package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age
+  languages:
+  - generic
+  message: 'This .npmrc does not set a minimum release age or sets it too low. Newly published packages can be malicious or
+    unstable. Add `min-release-age = 7` to wait 7 days before resolving newly published package versions. Added in: v11.10
+    Reference: https://github.blog/changelog/2026-02-18-npm-bulk-trusted-publishing-config-and-script-security-now-generally-available/'
   metadata:
     category: security
-    technology:
-    - dependabot
+    confidence: HIGH
     cwe:
     - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
     owasp:
     - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
     references:
-    - https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#cooldown
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown
-    shortlink: https://sg.run/5WvGK
+    - https://github.blog/changelog/2026-02-18-npm-bulk-trusted-publishing-config-and-script-security-now-generally-available/
+    - https://github.com/npm/cli/pull/8965
     semgrep.dev:
       rule:
-        r_id: 291647
-        rv_id: 1423386
-        rule_id: zdUArOL
-        version_id: DkTwEGl
-        url: https://semgrep.dev/playground/r/DkTwEGl/package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown
         origin: community
-- id: package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age
+        r_id: 291648
+        rule_id: pKU6A82
+        rv_id: 1423387
+        url: 
+          https://semgrep.dev/playground/r/WrT7LdL/package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age
+        version_id: WrT7LdL
+    shortlink: https://sg.run/GRo1z
+    source: https://semgrep.dev/r/package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age
+    subcategory:
+    - audit
+    technology:
+    - npm
+    - javascript
+    vulnerability_class:
+    - Insecure Configuration
+  paths:
+    include:
+    - '**/.npmrc'
   pattern-either:
   - patterns:
     - pattern-regex: (?:(?:^---\n)(?:[^\n]*\n)|^)(?P<TARGET>(?:(?!\n---)[\s\S])*\S(?:(?!\n---)[\s\S])*)
@@ -131,150 +172,110 @@ rules:
     - pattern-regex: min-release-age\s*=\s*\d+
     - pattern-regex: =\s*(?P<AGE>\d+)
     - metavariable-comparison:
-        metavariable: $AGE
         comparison: int($AGE) < 7
+        metavariable: $AGE
     - focus-metavariable: $AGE
   - patterns:
     - pattern-regex: (?m)min-release-age[ \t]*=[ \t]*(?P<VAL>[^\s\d][^\n]*)
     - focus-metavariable: $VAL
   - patterns:
     - pattern-regex: (?m)min-release-age\s*=\s*$
-  message: 'This .npmrc does not set a minimum release age or sets it too low. Newly published packages can be malicious or
-    unstable. Add `min-release-age = 7` to wait 7 days before resolving newly published package versions. Added in: v11.10
-    Reference: https://github.blog/changelog/2026-02-18-npm-bulk-trusted-publishing-config-and-script-security-now-generally-available/'
-  languages:
-  - generic
   severity: MEDIUM
-  paths:
-    include:
-    - '**/.npmrc'
-  metadata:
-    category: security
-    technology:
-    - npm
-    - javascript
-    cwe:
-    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
-    owasp:
-    - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
-    references:
-    - https://github.blog/changelog/2026-02-18-npm-bulk-trusted-publishing-config-and-script-security-now-generally-available/
-    - https://github.com/npm/cli/pull/8965
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age
-    shortlink: https://sg.run/GRo1z
-    semgrep.dev:
-      rule:
-        r_id: 291648
-        rv_id: 1423387
-        rule_id: pKU6A82
-        version_id: WrT7LdL
-        url: https://semgrep.dev/playground/r/WrT7LdL/package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age
-        origin: community
 - id: package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age
+  languages:
+  - yaml
   message: 'This pnpm workspace configuration does not set a minimum release age. Newly published packages can be malicious
     or unstable. Add `minimumReleaseAge: 10080` (minutes) to wait at least seven days before installing newly published package
     versions. Added in: v10.16.0 Reference: https://pnpm.io/settings#minimumreleaseage'
-  languages:
-  - yaml
-  severity: MEDIUM
+  metadata:
+    category: security
+    confidence: HIGH
+    cwe:
+    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
+    owasp:
+    - A08:2021 - Software and Data Integrity Failures
+    references:
+    - https://pnpm.io/settings#minimumreleaseage
+    semgrep.dev:
+      rule:
+        origin: community
+        r_id: 291650
+        rule_id: X5Uwn1n
+        rv_id: 1423389
+        url: 
+          https://semgrep.dev/playground/r/K3TgxrW/package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age
+        version_id: K3TgxrW
+    shortlink: https://sg.run/Aj0o0
+    source: https://semgrep.dev/r/package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age
+    subcategory:
+    - audit
+    technology:
+    - pnpm
+    vulnerability_class:
+    - Insecure Configuration
   paths:
     include:
     - '**/pnpm-workspace.yaml'
   pattern-either:
   - patterns:
-    - pattern-regex: (?ms)(?:\A|^---$\n)(?:(?!^minimumReleaseAge\s*:)(?!^---$)[\s\S])*?(?P<TARGET>^(?:packages|catalog)\s*:)(?:(?!^minimumReleaseAge\s*:)(?!^---$)[\s\S])*?(?=^---$|\z)
+    - pattern-regex: 
+        (?ms)(?:\A|^---$\n)(?:(?!^minimumReleaseAge\s*:)(?!^---$)[\s\S])*?(?P<TARGET>^(?:packages|catalog)\s*:)(?:(?!^minimumReleaseAge\s*:)(?!^---$)[\s\S])*?(?=^---$|\z)
     - focus-metavariable: $TARGET
   - patterns:
     - pattern-regex: ^\s*minimumReleaseAge\s*:\s*(?P<AGE>\d+)
     - metavariable-comparison:
-        metavariable: $AGE
         comparison: int($AGE) < 10080
+        metavariable: $AGE
     - focus-metavariable: $AGE
   - patterns:
-    - pattern: 'minimumReleaseAge: $AGE
-
-        '
+    - pattern: "minimumReleaseAge: $AGE\n"
     - metavariable-regex:
         metavariable: $AGE
         regex: ^\D
     - focus-metavariable: $AGE
   - patterns:
     - pattern-regex: (?m)^\s*minimumReleaseAge\s*:\s*$
-  metadata:
-    category: security
-    technology:
-    - pnpm
-    cwe:
-    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
-    owasp:
-    - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
-    references:
-    - https://pnpm.io/settings#minimumreleaseage
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age
-    shortlink: https://sg.run/Aj0o0
-    semgrep.dev:
-      rule:
-        r_id: 291650
-        rv_id: 1423389
-        rule_id: X5Uwn1n
-        version_id: K3TgxrW
-        url: https://semgrep.dev/playground/r/K3TgxrW/package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age
-        origin: community
+  severity: MEDIUM
 - id: package_managers.renovate.renovate-missing-minimum-release-age.renovate-missing-minimum-release-age
-  pattern-either:
-  - patterns:
-    - pattern-inside: "\"packageRules\": [\n  ...\n]\n"
-    - pattern-either:
-      - pattern: '{ ..., "matchPackageNames": [...], ... }
-
-          '
-      - pattern: '{ ..., "matchPackagePatterns": [...], ... }
-
-          '
-      - pattern: '{ ..., "matchDepTypes": [...], ... }
-
-          '
-    - pattern-not: "{\n  ...,\n  \"minimumReleaseAge\": $AGE,\n  ...\n}\n"
-    - pattern-not: "{\n  ...,\n  \"minimumReleaseAge\": false,\n  ...\n}\n"
-  - patterns:
-    - pattern-inside: "\"packageRules\": [\n  ...\n]\n"
-    - pattern-regex: '"minimumReleaseAge":\s*"(?P<AGE>\d+) days?"'
-    - metavariable-comparison:
-        metavariable: $AGE
-        comparison: int($AGE) < 7
-    - focus-metavariable: $AGE
-  - patterns:
-    - pattern-inside: "\"packageRules\": [\n  ...\n]\n"
-    - pattern: '"minimumReleaseAge": "$AGE"
-
-        '
-    - metavariable-regex:
-        metavariable: $AGE
-        regex: ^(?!\d+ days?$)
-    - focus-metavariable: $AGE
+  languages:
+  - json
   message: 'This Renovate configuration does not set a minimum release age. Newly published packages can be malicious or unstable.
     Add `"minimumReleaseAge": "7 days"` within a `packageRules` entry to wait 7 days before proposing updates to newly published
     package versions. Set `"minimumReleaseAge": false` to set an exception for minimal release age for the package rule. Added
     in: v42'
-  languages:
-  - json
-  severity: MEDIUM
+  metadata:
+    category: security
+    confidence: HIGH
+    cwe:
+    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
+    owasp:
+    - A08:2021 - Software and Data Integrity Failures
+    references:
+    - https://docs.renovatebot.com/configuration-options/#minimumreleaseage
+    semgrep.dev:
+      rule:
+        origin: community
+        r_id: 291652
+        rule_id: 10UbQrX
+        rv_id: 1443454
+        url: 
+          https://semgrep.dev/playground/r/jQT1KAX/package_managers.renovate.renovate-missing-minimum-release-age.renovate-missing-minimum-release-age
+        version_id: jQT1KAX
+    shortlink: https://sg.run/D8l2q
+    source: 
+      https://semgrep.dev/r/package_managers.renovate.renovate-missing-minimum-release-age.renovate-missing-minimum-release-age
+    subcategory:
+    - audit
+    technology:
+    - renovate
+    vulnerability_class:
+    - Insecure Configuration
   paths:
     include:
     - '**/renovate.json'
@@ -282,35 +283,70 @@ rules:
     - '**/.renovaterc'
     - '**/.renovaterc.json'
     - '**/.renovaterc.json5'
+  pattern-either:
+  - patterns:
+    - pattern-inside: "\"packageRules\": [\n  ...\n]\n"
+    - pattern-either:
+      - pattern: "{ ..., \"matchPackageNames\": [...], ... }\n"
+      - pattern: "{ ..., \"matchPackagePatterns\": [...], ... }\n"
+      - pattern: "{ ..., \"matchDepTypes\": [...], ... }\n"
+    - pattern-not: "{\n  ...,\n  \"minimumReleaseAge\": $AGE,\n  ...\n}\n"
+    - pattern-not: "{\n  ...,\n  \"minimumReleaseAge\": false,\n  ...\n}\n"
+  - patterns:
+    - pattern-inside: "\"packageRules\": [\n  ...\n]\n"
+    - pattern-regex: '"minimumReleaseAge":\s*"(?P<AGE>\d+) days?"'
+    - metavariable-comparison:
+        comparison: int($AGE) < 7
+        metavariable: $AGE
+    - focus-metavariable: $AGE
+  - patterns:
+    - pattern-inside: "\"packageRules\": [\n  ...\n]\n"
+    - pattern: "\"minimumReleaseAge\": \"$AGE\"\n"
+    - metavariable-regex:
+        metavariable: $AGE
+        regex: ^(?!\d+ days?$)
+    - focus-metavariable: $AGE
+  severity: MEDIUM
+- id: package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown
+  languages:
+  - generic
+  message: 'This pyproject.toml configures uv but does not set a dependency cooldown. Newly published packages can be malicious
+    or unstable. Add `exclude-newer = "7 days"` under `[tool.uv]` to wait 7 days before resolving newly published package
+    versions. Added in: 0.9.17 Reference: https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns'
   metadata:
     category: security
-    technology:
-    - renovate
+    confidence: HIGH
     cwe:
     - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
     owasp:
     - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
     references:
-    - https://docs.renovatebot.com/configuration-options/#minimumreleaseage
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.renovate.renovate-missing-minimum-release-age.renovate-missing-minimum-release-age
-    shortlink: https://sg.run/D8l2q
+    - https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns
     semgrep.dev:
       rule:
-        r_id: 291652
-        rv_id: 1443454
-        rule_id: 10UbQrX
-        version_id: jQT1KAX
-        url: https://semgrep.dev/playground/r/jQT1KAX/package_managers.renovate.renovate-missing-minimum-release-age.renovate-missing-minimum-release-age
         origin: community
-- id: package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown
+        r_id: 291653
+        rule_id: 9AUo6vE
+        rv_id: 1501839
+        url: 
+          https://semgrep.dev/playground/r/kbT3B1J/package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown
+        version_id: kbT3B1J
+    shortlink: https://sg.run/WeY0Z
+    source: https://semgrep.dev/r/package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown
+    subcategory:
+    - audit
+    technology:
+    - uv
+    - python
+    vulnerability_class:
+    - Insecure Configuration
+  paths:
+    include:
+    - '**/pyproject.toml'
+    - '**/uv.toml'
   pattern-either:
   - patterns:
     - pattern-regex: (?ms)\[tool\.uv\](?P<TARGET>[^\[]*?)(?=\[|\z)
@@ -321,64 +357,66 @@ rules:
   - patterns:
     - pattern-regex: exclude-newer\s*=\s*"(?P<DAYS>\d+)\s*d(?:ays?)?"
     - metavariable-comparison:
-        metavariable: $DAYS
         comparison: int($DAYS) < 7
+        metavariable: $DAYS
     - focus-metavariable: $DAYS
   - patterns:
     - pattern-regex: exclude-newer\s*=\s*"(?P<VAL>[^"]+)"
     - metavariable-regex:
         metavariable: $VAL
-        regex: (?i)^(?!\d+\s*d(?:ays?)?\b)(?!\d+\s*(?:weeks?|wks?|w|months?|mos?|mo|years?|yrs?|y)\b)(?!P[^Tt]*[WMY])(?!P(?:[7-9]|[1-9]\d+)D\b)
+        regex: 
+          (?i)^(?!\d+\s*d(?:ays?)?\b)(?!\d+\s*(?:weeks?|wks?|w|months?|mos?|mo|years?|yrs?|y)\b)(?!P[^Tt]*[WMY])(?!P(?:[7-9]|[1-9]\d+)D\b)
     - focus-metavariable: $VAL
-  message: 'This pyproject.toml configures uv but does not set a dependency cooldown. Newly published packages can be malicious
-    or unstable. Add `exclude-newer = "7 days"` under `[tool.uv]` to wait 7 days before resolving newly published package
-    versions. Added in: 0.9.17 Reference: https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns'
-  languages:
-  - generic
   severity: MEDIUM
-  paths:
-    include:
-    - '**/pyproject.toml'
-    - '**/uv.toml'
+- id: package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate
+  languages:
+  - yaml
+  message: 'This .yarnrc.yml does not set a minimal age gate or sets it too low. Newly published packages can be malicious
+    or unstable. Add `npmMinimalAgeGate: "7d"` to wait 7 days before resolving newly published package versions. Added in:
+    4.10 Reference: https://yarnpkg.com/configuration/yarnrc#npmMinimalAgeGate'
   metadata:
     category: security
-    technology:
-    - uv
-    - python
+    confidence: HIGH
     cwe:
     - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    likelihood: LOW
     owasp:
     - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
     references:
-    - https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown
-    shortlink: https://sg.run/WeY0Z
+    - https://yarnpkg.com/configuration/yarnrc#npmMinimalAgeGate
     semgrep.dev:
       rule:
-        r_id: 291653
-        rv_id: 1501839
-        rule_id: 9AUo6vE
-        version_id: kbT3B1J
-        url: https://semgrep.dev/playground/r/kbT3B1J/package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown
         origin: community
-- id: package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate
+        r_id: 291654
+        rule_id: yyUBeEz
+        rv_id: 1423393
+        url: 
+          https://semgrep.dev/playground/r/JdTnXlj/package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate
+        version_id: JdTnXlj
+    shortlink: https://sg.run/0gvNq
+    source: https://semgrep.dev/r/package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate
+    subcategory:
+    - audit
+    technology:
+    - yarn
+    - javascript
+    vulnerability_class:
+    - Insecure Configuration
+  paths:
+    include:
+    - '**/.yarnrc.yml'
   pattern-either:
   - patterns:
-    - pattern-regex: (?ms)(?:\A|^---$\n)(?:(?!^npmMinimalAgeGate\s*:)(?!^---$)[\s\S])*?(?P<TARGET>^(?:nodeLinker|yarnPath|enableGlobalCache|npmScopes|npmRegistryServer)\s*:)(?:(?!^npmMinimalAgeGate\s*:)(?!^---$)[\s\S])*?(?=^---$|\z)
+    - pattern-regex: 
+        (?ms)(?:\A|^---$\n)(?:(?!^npmMinimalAgeGate\s*:)(?!^---$)[\s\S])*?(?P<TARGET>^(?:nodeLinker|yarnPath|enableGlobalCache|npmScopes|npmRegistryServer)\s*:)(?:(?!^npmMinimalAgeGate\s*:)(?!^---$)[\s\S])*?(?=^---$|\z)
     - focus-metavariable: $TARGET
   - patterns:
     - pattern-regex: (?m)npmMinimalAgeGate\s*:\s*['"]?(?P<DAYS>\d+)d['"]?
     - metavariable-comparison:
-        metavariable: $DAYS
         comparison: int($DAYS) < 7
+        metavariable: $DAYS
     - focus-metavariable: $DAYS
   - patterns:
     - pattern-regex: (?m)npmMinimalAgeGate[ \t]*:[ \t]*(?P<VAL>\S+)
@@ -388,41 +426,4 @@ rules:
     - focus-metavariable: $VAL
   - patterns:
     - pattern-regex: (?m)^npmMinimalAgeGate\s*:\s*$
-  message: 'This .yarnrc.yml does not set a minimal age gate or sets it too low. Newly published packages can be malicious
-    or unstable. Add `npmMinimalAgeGate: "7d"` to wait 7 days before resolving newly published package versions. Added in:
-    4.10 Reference: https://yarnpkg.com/configuration/yarnrc#npmMinimalAgeGate'
-  languages:
-  - yaml
   severity: MEDIUM
-  paths:
-    include:
-    - '**/.yarnrc.yml'
-  metadata:
-    category: security
-    technology:
-    - yarn
-    - javascript
-    cwe:
-    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
-    owasp:
-    - A08:2021 - Software and Data Integrity Failures
-    confidence: HIGH
-    likelihood: LOW
-    impact: HIGH
-    subcategory:
-    - audit
-    vulnerability_class:
-    - Insecure Configuration
-    references:
-    - https://yarnpkg.com/configuration/yarnrc#npmMinimalAgeGate
-    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
-    source: https://semgrep.dev/r/package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate
-    shortlink: https://sg.run/0gvNq
-    semgrep.dev:
-      rule:
-        r_id: 291654
-        rv_id: 1423393
-        rule_id: yyUBeEz
-        version_id: JdTnXlj
-        url: https://semgrep.dev/playground/r/JdTnXlj/package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate
-        origin: community
