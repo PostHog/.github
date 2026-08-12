@@ -1,0 +1,21 @@
+{
+    "github-actions": ["p/github-actions"],
+    "go-lang-security": ["r/go.lang.security"],
+    "golang": ["p/golang"],
+    "javascript": ["p/javascript"],
+    "owasp-top-ten": ["p/owasp-top-ten"],
+    "package-managers": [
+        "r/package_managers.renovate.renovate-missing-minimum-release-age.renovate-missing-minimum-release-age",
+        "r/package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown",
+        "r/package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age",
+        "r/package_managers.yarn.yarn-missing-minimal-age-gate.yarn-missing-minimal-age-gate",
+        "r/package_managers.bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age",
+        "r/package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age",
+        "r/package_managers.uv.uv-missing-dependency-cooldown.uv-missing-dependency-cooldown"
+    ],
+    "python": ["p/python"],
+    "rust": ["p/rust"],
+    "rust-lang-security": ["r/rust.lang.security"],
+    "security-audit": ["p/security-audit"],
+    "trailofbits": ["p/trailofbits"]
+}

@@ -25,15 +25,20 @@ jobs:
             - name: Checkout
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+            # Registry packs are pinned as snapshots in .semgrep/registry/
+            # (refreshed by the semgrep-registry-update workflow), which is
+            # also excluded from the scan target — vendored upstream rule
+            # files aren't ours to lint.
             # exclude all directories already scanned by other jobs
             - name: Run Semgrep
               run: |
                   semgrep \
-                    --config "p/owasp-top-ten" \
-                    --config "p/security-audit" \
-                    --config "p/trailofbits" \
-                    --config "p/github-actions" \
+                    --config ".semgrep/registry/owasp-top-ten.yaml" \
+                    --config ".semgrep/registry/security-audit.yaml" \
+                    --config ".semgrep/registry/trailofbits.yaml" \
+                    --config ".semgrep/registry/github-actions.yaml" \
                     --exclude ".semgrep/rules/*.test.yaml" \
+                    --exclude ".semgrep/registry" \
                     --error \
                     --metrics=off \
                     --verbose \

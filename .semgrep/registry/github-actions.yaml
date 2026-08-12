@@ -1,0 +1,778 @@
+# GENERATED FILE - DO NOT EDIT.
+# Snapshot of Semgrep registry config(s): p/github-actions
+# Rules are fetched from https://semgrep.dev/c/<id>, deduplicated by rule id,
+# and sorted. Refresh with: python3 .github/scripts/semgrep_registry.py sync
+# (the semgrep-registry-update workflow does this on a schedule).
+rules:
+- id: yaml.github-actions.security.allowed-unsecure-commands.allowed-unsecure-commands
+  languages:
+  - yaml
+  severity: WARNING
+  message: The environment variable `ACTIONS_ALLOW_UNSECURE_COMMANDS` grants this workflow permissions to use the `set-env`
+    and `add-path` commands. There is a vulnerability in these commands that could result in environment variables being modified
+    by an attacker. Depending on the use of the environment variable, this could enable an attacker to, at worst, modify the
+    system path to run a different command than intended, resulting in arbitrary code execution. This could result in stolen
+    code or secrets. Don't use `ACTIONS_ALLOW_UNSECURE_COMMANDS`. Instead, use Environment Files. See https://github.com/actions/toolkit/blob/main/docs/commands.md#environment-files
+    for more information.
+  metadata:
+    cwe:
+    - 'CWE-749: Exposed Dangerous Method or Function'
+    owasp: A06:2017 - Security Misconfiguration
+    references:
+    - https://github.blog/changelog/2020-10-01-github-actions-deprecating-set-env-and-add-path-commands/
+    - https://github.com/actions/toolkit/security/advisories/GHSA-mfwh-5m23-j46w
+    - https://github.com/actions/toolkit/blob/main/docs/commands.md#environment-files
+    category: security
+    technology:
+    - github-actions
+    subcategory:
+    - vuln
+    likelihood: LOW
+    impact: MEDIUM
+    confidence: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Dangerous Method or Function
+    source: https://semgrep.dev/r/yaml.github-actions.security.allowed-unsecure-commands.allowed-unsecure-commands
+    shortlink: https://sg.run/qq78
+    semgrep.dev:
+      rule:
+        r_id: 13412
+        rv_id: 947039
+        rule_id: EwUQ9x
+        version_id: jQTzq34
+        url: https://semgrep.dev/playground/r/jQTzq34/yaml.github-actions.security.allowed-unsecure-commands.allowed-unsecure-commands
+        origin: community
+  patterns:
+  - pattern-either:
+    - patterns:
+      - pattern-inside: '{env: ...}'
+      - pattern: 'ACTIONS_ALLOW_UNSECURE_COMMANDS: true'
+- id: yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command
+  patterns:
+  - pattern-regex: '::add-mask::'
+  languages:
+  - yaml
+  severity: WARNING
+  message: GitHub Actions provides the **'add-mask'** workflow command to mask sensitive data in the workflow logs. If **'add-mask'**
+    is not used or if workflow commands have been stopped, sensitive data can leaked into the workflow logs. An attacker could
+    simply copy the workflow to another branch and add the following payload `echo "::stop-commands::$stopMarker"` to stop
+    workflow command processing ([described here](https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#stopping-and-starting-workflow-commands)),
+    which will cause the secret token to be exposed despite the **'add-mask'** usage. For more information, please refer to
+    the [GitHub documentation](https://github.com/actions/toolkit/blob/main/docs/commands.md#register-a-secret).
+  metadata:
+    cwe:
+    - 'CWE-200: Exposure of Sensitive Information to an Unauthorized Actor'
+    owasp: A06:2017 - Security Misconfiguration
+    category: security
+    technology:
+    - github-actions
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    confidence: LOW
+    vulnerability_class:
+    - Dangerous Method or Function
+    references:
+    - https://github.blog/changelog/2020-10-01-github-actions-deprecating-set-env-and-add-path-commands/
+    - https://github.com/actions/runner/issues/159
+    - https://github.com/actions/runner/issues/475
+    - https://github.com/actions/runner/issues/807
+    - https://0xn3va.gitbook.io/cheat-sheets/ci-cd/github/actions#misuse-of-sensitive-data-in-workflows
+    - https://github.com/github/docs/blob/main/content/actions/using-workflows/workflow-commands-for-github-actions.md#masking-a-value-in-a-log
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    source: https://semgrep.dev/r/yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command
+    shortlink: https://sg.run/lBYDo
+    semgrep.dev:
+      rule:
+        r_id: 138057
+        rv_id: 947040
+        rule_id: GdUvn8y
+        version_id: 1QToZdr
+        url: https://semgrep.dev/playground/r/1QToZdr/yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command
+        origin: community
+- id: yaml.github-actions.security.curl-eval.curl-eval
+  languages:
+  - yaml
+  message: Data is being eval'd from a `curl` command. An attacker with control of the server in the `curl` command could
+    inject malicious code into the `eval`, resulting in a system comrpomise. Avoid eval'ing untrusted data if you can. If
+    you must do this, consider checking the SHA sum of the content returned by the server to verify its integrity.
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-78: Improper Neutralization of Special Elements used in an OS Command (''OS Command Injection'')'
+    owasp:
+    - A01:2017 - Injection
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://docs.github.com/en/actions/learn-github-actions/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
+    technology:
+    - github-actions
+    - bash
+    - curl
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: HIGH
+    confidence: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Command Injection
+    source: https://semgrep.dev/r/yaml.github-actions.security.curl-eval.curl-eval
+    shortlink: https://sg.run/9r7r
+    semgrep.dev:
+      rule:
+        r_id: 14967
+        rv_id: 1263926
+        rule_id: X5Udrd
+        version_id: YDTZe7K
+        url: https://semgrep.dev/playground/r/YDTZe7K/yaml.github-actions.security.curl-eval.curl-eval
+        origin: community
+  patterns:
+  - pattern-inside: 'steps: [...]'
+  - pattern-inside: "- run: ...\n  ...\n"
+  - pattern: 'run: $SHELL'
+  - metavariable-pattern:
+      language: bash
+      metavariable: $SHELL
+      patterns:
+      - pattern: '$DATA=<... curl ...>
+
+          ...
+
+          eval <... $DATA ...>
+
+          '
+  severity: ERROR
+- id: yaml.github-actions.security.detect-shai-hulud-backdoor.detect-shai-hulud-backdoor
+  languages:
+  - yaml
+  message: The Shai-hulud backdoor creates a purposefully vulnerable github action with the name `discussion.yaml`.
+  paths:
+    include:
+    - '**/.github/workflows/discussion.yaml'
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-509: Replicating Malicious Code (Virus or Worm)'
+    owasp:
+    - A01:2017 - Injection
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    technology:
+    - github-actions
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - vuln
+    likelihood: HIGH
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Command Injection
+    source_rule_url: https://www.wiz.io/blog/shai-hulud-2-0-ongoing-supply-chain-attack
+    references:
+    - https://www.aikido.dev/blog/shai-hulud-strikes-again-hitting-zapier-ensdomains
+    source: https://semgrep.dev/r/yaml.github-actions.security.detect-shai-hulud-backdoor.detect-shai-hulud-backdoor
+    shortlink: https://sg.run/JdYPZ
+    semgrep.dev:
+      rule:
+        r_id: 238946
+        rv_id: 1263927
+        rule_id: 7KUDRPj
+        version_id: 6xT29ol
+        url: https://semgrep.dev/playground/r/6xT29ol/yaml.github-actions.security.detect-shai-hulud-backdoor.detect-shai-hulud-backdoor
+        origin: community
+  patterns:
+  - pattern-inside: 'steps: [...]'
+  - pattern-inside: "- run: ...\n  ...\n"
+  - pattern: 'run: $SHELL'
+  - metavariable-pattern:
+      language: generic
+      metavariable: $SHELL
+      patterns:
+      - pattern-either:
+        - pattern: ${{ github.event.issue.title }}
+        - pattern: ${{ github.event.issue.body }}
+        - pattern: ${{ github.event.pull_request.title }}
+        - pattern: ${{ github.event.pull_request.body }}
+        - pattern: ${{ github.event.comment.body }}
+        - pattern: ${{ github.event.review.body }}
+        - pattern: ${{ github.event.review_comment.body }}
+        - pattern: ${{ github.event.pages. ... .page_name}}
+        - pattern: ${{ github.event.head_commit.message }}
+        - pattern: ${{ github.event.head_commit.author.email }}
+        - pattern: ${{ github.event.head_commit.author.name }}
+        - pattern: ${{ github.event.commits ... .author.email }}
+        - pattern: ${{ github.event.commits ... .author.name }}
+        - pattern: ${{ github.event.pull_request.head.ref }}
+        - pattern: ${{ github.event.pull_request.head.label }}
+        - pattern: ${{ github.event.pull_request.head.repo.default_branch }}
+        - pattern: ${{ github.head_ref }}
+        - pattern: ${{ github.event.inputs ... }}
+        - pattern: ${{ github.event.discussion.title }}
+        - pattern: ${{ github.event.discussion.body }}
+        - pattern: ${{ inputs ... }}
+  severity: ERROR
+- id: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+  languages:
+  - yaml
+  message: A `run:` step pipes the output of `curl` or `wget` directly into a shell interpreter. This is the "curl | bash"
+    install pattern — if the remote server is compromised or the URL is hijacked, an attacker can execute arbitrary code in
+    your CI runner. Consider downloading the file first, verifying its checksum or signature, and then executing it.
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-78: Improper Neutralization of Special Elements used in an OS Command (''OS Command Injection'')'
+    owasp:
+    - A03:2021 - Injection
+    - A03:2025 - Injection
+    references:
+    - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions
+    - https://www.idontplaydarts.com/2016/04/detecting-curl-pipe-bash-server-side/
+    technology:
+    - github-actions
+    - bash
+    - curl
+    cwe2021-top25: true
+    cwe2022-top25: true
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Command Injection
+    source: https://semgrep.dev/r/yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+    shortlink: https://sg.run/GR8K1
+    semgrep.dev:
+      rule:
+        r_id: 309392
+        rv_id: 1443456
+        rule_id: x8UAgrE
+        version_id: 9lT3zYb
+        url: https://semgrep.dev/playground/r/9lT3zYb/yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
+        origin: community
+  patterns:
+  - pattern-inside: 'steps: [...]'
+  - pattern-inside: "- run: ...\n  ...\n"
+  - pattern: 'run: $SHELL'
+  - metavariable-pattern:
+      language: bash
+      metavariable: $SHELL
+      patterns:
+      - pattern-either:
+        - pattern: curl ... | $CMD ...
+        - pattern: wget ... | $CMD ...
+      - metavariable-regex:
+          metavariable: $CMD
+          regex: ^(bash|sh|python3?|ruby|perl)$
+  severity: ERROR
+- id: yaml.github-actions.security.gha-workflow-env-secret.gha-workflow-env-secret
+  languages:
+  - yaml
+  message: 'A secret is exposed in the workflow-level `env:` block, making it available to every job and step in this workflow
+    — including any untrusted code run in pull-request workflows. Scope secrets as narrowly as possible: prefer step-level
+    `env:` so the secret is only available where it is actually needed.'
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-732: Incorrect Permission Assignment for Critical Resource'
+    owasp:
+    - A01:2021 - Broken Access Control
+    - A01:2025 - Broken Access Control
+    references:
+    - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-secrets
+    - https://docs.github.com/en/actions/learn-github-actions/variables#defining-environment-variables-for-a-single-workflow
+    technology:
+    - github-actions
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: HIGH
+    confidence: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Improper Authorization
+    source: https://semgrep.dev/r/yaml.github-actions.security.gha-workflow-env-secret.gha-workflow-env-secret
+    shortlink: https://sg.run/Rrn12
+    semgrep.dev:
+      rule:
+        r_id: 309393
+        rv_id: 1443457
+        rule_id: OrUnq7z
+        version_id: yeTqX9r
+        url: https://semgrep.dev/playground/r/yeTqX9r/yaml.github-actions.security.gha-workflow-env-secret.gha-workflow-env-secret
+        origin: community
+  patterns:
+  - pattern-inside: "env:\n  ...\n"
+  - pattern-regex: \$\{\{\s*secrets\.
+  - pattern-not-inside: 'jobs: ...'
+  severity: WARNING
+- id: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+  message: 'GitHub Actions step uses a mutable tag or branch reference. Tags and branch names can be silently repointed by
+    the action owner, enabling supply-chain attacks — as seen in the trivy-action and kics-github-action compromises. Pin
+    the reference to a full 40-character commit SHA instead, e.g. `uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608`.'
+  severity: WARNING
+  languages:
+  - yaml
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-1357: Reliance on Insufficiently Trustworthy Component'
+    - 'CWE-353: Missing Support for Integrity Check'
+    owasp:
+    - A08:2021 - Software and Data Integrity Failures
+    - A08:2025 - Software and Data Integrity Failures
+    references:
+    - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+    technology:
+    - github-actions
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    - Other
+    source: https://semgrep.dev/r/yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+    shortlink: https://sg.run/2LgAL
+    semgrep.dev:
+      rule:
+        r_id: 288863
+        rv_id: 1413422
+        rule_id: GdUxYDx
+        version_id: xyTRDAd
+        url: https://semgrep.dev/playground/r/xyTRDAd/yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+        origin: community
+  patterns:
+  - pattern-inside: '{steps: ...}'
+  - pattern: 'uses: "$ACTION"
+
+      '
+  - metavariable-pattern:
+      metavariable: $ACTION
+      language: generic
+      patterns:
+      - pattern-not-regex: ^\./
+      - pattern-not-regex: ^docker://
+      - pattern-not-regex: '@[0-9a-f]{40}(\s|$)'
+- id: yaml.github-actions.security.github-script-injection.github-script-injection
+  languages:
+  - yaml
+  message: 'Using variable interpolation `${{...}}` with `github` context data in a `actions/github-script`''s `script:` step
+    could allow an attacker to inject their own code into the runner. This would allow them to steal secrets and code. `github`
+    context data can have arbitrary user input and should be treated as untrusted. Instead, use an intermediate environment
+    variable with `env:` to store the data and use the environment variable in the `run:` script. Be sure to use double-quotes
+    the environment variable, like this: "$ENVVAR".'
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-94: Improper Control of Generation of Code (''Code Injection'')'
+    owasp:
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://docs.github.com/en/actions/learn-github-actions/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
+    - https://securitylab.github.com/research/github-actions-untrusted-input/
+    - https://github.com/actions/github-script
+    technology:
+    - github-actions
+    cwe2022-top25: true
+    subcategory:
+    - vuln
+    likelihood: HIGH
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Code Injection
+    source: https://semgrep.dev/r/yaml.github-actions.security.github-script-injection.github-script-injection
+    shortlink: https://sg.run/g1G0
+    semgrep.dev:
+      rule:
+        r_id: 31441
+        rv_id: 1501843
+        rule_id: OrUQvK
+        version_id: e1TboJK
+        url: https://semgrep.dev/playground/r/e1TboJK/yaml.github-actions.security.github-script-injection.github-script-injection
+        origin: community
+  patterns:
+  - pattern-inside: 'steps: [...]'
+  - pattern-inside: 'uses: $ACTION
+
+      ...
+
+      '
+  - pattern-inside: "with:\n  ...\n  script: ...\n  ...\n"
+  - pattern: 'script: $SHELL'
+  - metavariable-regex:
+      metavariable: $ACTION
+      regex: actions/github-script@.*
+  - metavariable-pattern:
+      language: generic
+      metavariable: $SHELL
+      patterns:
+      - pattern-either:
+        - pattern: ${{ ... github.event.issue.title ... }}
+        - pattern: ${{ ... github.event.issue.body ... }}
+        - pattern: ${{ ... github.event.pull_request.title ... }}
+        - pattern: ${{ ... github.event.pull_request.body ... }}
+        - pattern: ${{ ... github.event.comment.body ... }}
+        - pattern: ${{ ... github.event.review.body ... }}
+        - pattern: ${{ ... github.event.review_comment.body ... }}
+        - pattern: ${{ ... github.event.pages ... .page_name ... }}
+        - pattern: ${{ ... github.event.head_commit.message ... }}
+        - pattern: ${{ ... github.event.head_commit.author.email ... }}
+        - pattern: ${{ ... github.event.head_commit.author.name ... }}
+        - pattern: ${{ ... github.event.commits ... .author.email ... }}
+        - pattern: ${{ ... github.event.commits ... .author.name ... }}
+        - pattern: ${{ ... github.event.commits ... .message ... }}
+        - pattern: ${{ ... github.event.pull_request.head.ref ... }}
+        - pattern: ${{ ... github.event.pull_request.head.label ... }}
+        - pattern: ${{ ... github.event.pull_request.head.repo.default_branch ... }}
+        - pattern: ${{ ... github.ref ... }}
+        - pattern: ${{ ... github.base_ref ... }}
+        - pattern: ${{ ... github.head_ref ... }}
+        - pattern: ${{ ... github.ref_name ... }}
+        - pattern: ${{ ... github.event.inputs ... }}
+        - pattern: ${{ ... github.event.discussion.title ... }}
+        - pattern: ${{ ... github.event.discussion.body ... }}
+        - pattern: ${{ ... github.event.workflow_run.head_branch ... }}
+        - pattern: ${{ ... github.event.workflow_run.head_commit.message ... }}
+        - pattern: ${{ ... github.event.milestone.title ... }}
+        - pattern: ${{ ... github.event.milestone.description ... }}
+        - pattern: ${{ ... github.event.project_card.note ... }}
+        - pattern: ${{ ... github.event.project.name ... }}
+        - pattern: ${{ ... github.event.project_column.name ... }}
+        - pattern: ${{ ... github.event.release.name ... }}
+        - pattern: ${{ ... github.event.release.body ... }}
+        - pattern: ${{ ... github.event.deployment.ref ... }}
+        - pattern: ${{ ... inputs ... }}
+      - pattern-not: ${{ ... github.event.issue.title && ... }}
+      - pattern-not: ${{ ... github.event.issue.body && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.title && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.body && ... }}
+      - pattern-not: ${{ ... github.event.comment.body && ... }}
+      - pattern-not: ${{ ... github.event.review.body && ... }}
+      - pattern-not: ${{ ... github.event.review_comment.body && ... }}
+      - pattern-not: ${{ ... github.event.pages ... .page_name && ... }}
+      - pattern-not: ${{ ... github.event.head_commit.message && ... }}
+      - pattern-not: ${{ ... github.event.head_commit.author.email && ... }}
+      - pattern-not: ${{ ... github.event.head_commit.author.name && ... }}
+      - pattern-not: ${{ ... github.event.commits ... .author.email && ... }}
+      - pattern-not: ${{ ... github.event.commits ... .author.name && ... }}
+      - pattern-not: ${{ ... github.event.commits ... .message && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.head.ref && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.head.label && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.head.repo.default_branch && ... }}
+      - pattern-not: ${{ ... github.ref && ... }}
+      - pattern-not: ${{ ... github.base_ref && ... }}
+      - pattern-not: ${{ ... github.head_ref && ... }}
+      - pattern-not: ${{ ... github.ref_name && ... }}
+      - pattern-not: ${{ ... github.event.inputs && ... }}
+      - pattern-not: ${{ ... github.event.discussion.title && ... }}
+      - pattern-not: ${{ ... github.event.discussion.body && ... }}
+      - pattern-not: ${{ ... github.event.workflow_run.head_branch && ... }}
+      - pattern-not: ${{ ... github.event.workflow_run.head_commit.message && ... }}
+      - pattern-not: ${{ ... github.event.milestone.title && ... }}
+      - pattern-not: ${{ ... github.event.milestone.description && ... }}
+      - pattern-not: ${{ ... github.event.project_card.note && ... }}
+      - pattern-not: ${{ ... github.event.project.name && ... }}
+      - pattern-not: ${{ ... github.event.project_column.name && ... }}
+      - pattern-not: ${{ ... github.event.release.name && ... }}
+      - pattern-not: ${{ ... github.event.release.body && ... }}
+      - pattern-not: ${{ ... github.event.deployment.ref && ... }}
+  severity: ERROR
+- id: yaml.github-actions.security.pull-request-target-code-checkout.pull-request-target-code-checkout
+  languages:
+  - yaml
+  message: This GitHub Actions workflow file uses `pull_request_target` and checks out code from the incoming pull request.
+    When using `pull_request_target`, the Action runs in the context of the target repository, which includes access to all
+    repository secrets. Normally, this is safe because the Action only runs code from the target repository, not the incoming
+    PR. However, by checking out the incoming PR code, you're now using the incoming code for the rest of the action. You
+    may be inadvertently executing arbitrary code from the incoming PR with access to repository secrets, which would let
+    an attacker steal repository secrets. This normally happens by running build scripts (e.g., `npm build` and `make`) or
+    dependency installation scripts (e.g., `python setup.py install`). Audit your workflow file to make sure no code from
+    the incoming PR is executed. Please see https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+    for additional mitigations.
+  metadata:
+    category: security
+    owasp:
+    - A08:2021 - Software and Data Integrity Failures
+    - A08:2025 - Software and Data Integrity Failures
+    cwe:
+    - 'CWE-829: Inclusion of Functionality from Untrusted Control Sphere'
+    references:
+    - https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+    - https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
+    - https://github.com/justinsteven/advisories/blob/master/2021_github_actions_checkspelling_token_leak_via_advice_symlink.md
+    technology:
+    - github-actions
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Other
+    source: https://semgrep.dev/r/yaml.github-actions.security.pull-request-target-code-checkout.pull-request-target-code-checkout
+    shortlink: https://sg.run/jkdn
+    semgrep.dev:
+      rule:
+        r_id: 13365
+        rv_id: 1413423
+        rule_id: d8Ulkd
+        version_id: O9TQ2nX
+        url: https://semgrep.dev/playground/r/O9TQ2nX/yaml.github-actions.security.pull-request-target-code-checkout.pull-request-target-code-checkout
+        origin: community
+  patterns:
+  - pattern-either:
+    - pattern-inside: "on:\n  ...\n  pull_request_target: ...\n  ...\n...\n"
+    - pattern-inside: 'on: [..., pull_request_target, ...]
+
+        ...
+
+        '
+    - pattern-inside: 'on: pull_request_target
+
+        ...
+
+        '
+  - pattern-inside: "jobs:\n  ...\n  $JOBNAME:\n    ...\n    steps:\n      ...\n"
+  - pattern: "...\nuses: \"$ACTION\"\nwith:\n  ...\n  ref: $EXPR\n"
+  - metavariable-regex:
+      metavariable: $ACTION
+      regex: actions/checkout@.*
+  - metavariable-pattern:
+      language: generic
+      metavariable: $EXPR
+      patterns:
+      - pattern-inside: ${{ ... }}
+      - pattern-either:
+        - pattern: github.event.pull_request ...
+        - pattern: github.head_ref ...
+  severity: ERROR
+- id: yaml.github-actions.security.run-shell-injection.run-shell-injection
+  languages:
+  - yaml
+  message: 'Using variable interpolation `${{...}}` with `github` context data in a `run:` step could allow an attacker to
+    inject their own code into the runner. This would allow them to steal secrets and code. `github` context data can have
+    arbitrary user input and should be treated as untrusted. Instead, use an intermediate environment variable with `env:`
+    to store the data and use the environment variable in the `run:` script. Be sure to use double-quotes the environment
+    variable, like this: "$ENVVAR".'
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-78: Improper Neutralization of Special Elements used in an OS Command (''OS Command Injection'')'
+    owasp:
+    - A01:2017 - Injection
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://docs.github.com/en/actions/learn-github-actions/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
+    - https://securitylab.github.com/research/github-actions-untrusted-input/
+    technology:
+    - github-actions
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - vuln
+    likelihood: HIGH
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Command Injection
+    source: https://semgrep.dev/r/yaml.github-actions.security.run-shell-injection.run-shell-injection
+    shortlink: https://sg.run/pkzk
+    semgrep.dev:
+      rule:
+        r_id: 13162
+        rv_id: 1501844
+        rule_id: v8UjQj
+        version_id: vdTowy6
+        url: https://semgrep.dev/playground/r/vdTowy6/yaml.github-actions.security.run-shell-injection.run-shell-injection
+        origin: community
+  patterns:
+  - pattern-inside: 'steps: [...]'
+  - pattern-inside: "- run: ...\n  ...\n"
+  - pattern: 'run: $SHELL'
+  - metavariable-pattern:
+      language: generic
+      metavariable: $SHELL
+      patterns:
+      - pattern-either:
+        - pattern: ${{ ... github.event.issue.title ... }}
+        - pattern: ${{ ... github.event.issue.body ... }}
+        - pattern: ${{ ... github.event.pull_request.title ... }}
+        - pattern: ${{ ... github.event.pull_request.body ... }}
+        - pattern: ${{ ... github.event.comment.body ... }}
+        - pattern: ${{ ... github.event.review.body ... }}
+        - pattern: ${{ ... github.event.review_comment.body ... }}
+        - pattern: ${{ ... github.event.pages ... .page_name ... }}
+        - pattern: ${{ ... github.event.head_commit.message ... }}
+        - pattern: ${{ ... github.event.head_commit.author.email ... }}
+        - pattern: ${{ ... github.event.head_commit.author.name ... }}
+        - pattern: ${{ ... github.event.commits ... .author.email ... }}
+        - pattern: ${{ ... github.event.commits ... .author.name ... }}
+        - pattern: ${{ ... github.event.commits ... .message ... }}
+        - pattern: ${{ ... github.event.pull_request.head.ref ... }}
+        - pattern: ${{ ... github.event.pull_request.head.label ... }}
+        - pattern: ${{ ... github.event.pull_request.head.repo.default_branch ... }}
+        - pattern: ${{ ... github.ref ... }}
+        - pattern: ${{ ... github.base_ref ... }}
+        - pattern: ${{ ... github.head_ref ... }}
+        - pattern: ${{ ... github.ref_name ... }}
+        - pattern: ${{ ... github.event.inputs ... }}
+        - pattern: ${{ ... github.event.discussion.title ... }}
+        - pattern: ${{ ... github.event.discussion.body ... }}
+        - pattern: ${{ ... github.event.workflow_run.head_branch ... }}
+        - pattern: ${{ ... github.event.workflow_run.head_commit.message ... }}
+        - pattern: ${{ ... github.event.milestone.title ... }}
+        - pattern: ${{ ... github.event.milestone.description ... }}
+        - pattern: ${{ ... github.event.project_card.note ... }}
+        - pattern: ${{ ... github.event.project.name ... }}
+        - pattern: ${{ ... github.event.project_column.name ... }}
+        - pattern: ${{ ... github.event.release.name ... }}
+        - pattern: ${{ ... github.event.release.body ... }}
+        - pattern: ${{ ... github.event.deployment.ref ... }}
+        - pattern: ${{ ... inputs ... }}
+      - pattern-not: ${{ ... github.event.issue.title && ... }}
+      - pattern-not: ${{ ... github.event.issue.body && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.title && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.body && ... }}
+      - pattern-not: ${{ ... github.event.comment.body && ... }}
+      - pattern-not: ${{ ... github.event.review.body && ... }}
+      - pattern-not: ${{ ... github.event.review_comment.body && ... }}
+      - pattern-not: ${{ ... github.event.pages ... .page_name && ... }}
+      - pattern-not: ${{ ... github.event.head_commit.message && ... }}
+      - pattern-not: ${{ ... github.event.head_commit.author.email && ... }}
+      - pattern-not: ${{ ... github.event.head_commit.author.name && ... }}
+      - pattern-not: ${{ ... github.event.commits ... .author.email && ... }}
+      - pattern-not: ${{ ... github.event.commits ... .author.name && ... }}
+      - pattern-not: ${{ ... github.event.commits ... .message && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.head.ref && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.head.label && ... }}
+      - pattern-not: ${{ ... github.event.pull_request.head.repo.default_branch && ... }}
+      - pattern-not: ${{ ... github.event.workflow_run.head_commit.message && ... }}
+      - pattern-not: ${{ ... github.ref && ... }}
+      - pattern-not: ${{ ... github.base_ref && ... }}
+      - pattern-not: ${{ ... github.head_ref && ... }}
+      - pattern-not: ${{ ... github.ref_name && ... }}
+      - pattern-not: ${{ ... github.event.inputs && ... }}
+      - pattern-not: ${{ ... github.event.discussion.title && ... }}
+      - pattern-not: ${{ ... github.event.discussion.body && ... }}
+      - pattern-not: ${{ ... github.event.workflow_run.head_branch && ... }}
+      - pattern-not: ${{ ... github.event.milestone.title && ... }}
+      - pattern-not: ${{ ... github.event.milestone.description && ... }}
+      - pattern-not: ${{ ... github.event.project_card.note && ... }}
+      - pattern-not: ${{ ... github.event.project.name && ... }}
+      - pattern-not: ${{ ... github.event.project_column.name && ... }}
+      - pattern-not: ${{ ... github.event.release.name && ... }}
+      - pattern-not: ${{ ... github.event.release.body && ... }}
+      - pattern-not: ${{ ... github.event.deployment.ref && ... }}
+  severity: ERROR
+- id: yaml.github-actions.security.secrets-inherit.secrets-inherit
+  languages:
+  - yaml
+  severity: ERROR
+  message: 'This workflow uses `secrets: inherit` to pass all of the calling workflow''s secrets to a reusable workflow. This
+    violates the principle of least privilege because the called workflow receives access to every secret in the repository,
+    not just the ones it needs. If the called workflow is compromised or sourced from a third party, an attacker gains access
+    to all repository secrets. Instead, explicitly pass only the secrets that the called workflow requires using the `secrets:`
+    map, e.g. `secrets: { MY_SECRET: ${{ secrets.MY_SECRET }} }`.'
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-250: Execution with Unnecessary Privileges'
+    owasp:
+    - A01:2021 - Broken Access Control
+    - A01:2025 - Broken Access Control
+    references:
+    - https://docs.github.com/en/actions/sharing-automations/reusing-workflows#passing-inputs-and-secrets-to-a-reusable-workflow
+    - https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions
+    technology:
+    - github-actions
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: HIGH
+    confidence: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Improper Authorization
+    source: https://semgrep.dev/r/yaml.github-actions.security.secrets-inherit.secrets-inherit
+    shortlink: https://sg.run/X2PZB
+    semgrep.dev:
+      rule:
+        r_id: 288864
+        rv_id: 1413424
+        rule_id: ReUQnKg
+        version_id: e1T42L1
+        url: https://semgrep.dev/playground/r/e1T42L1/yaml.github-actions.security.secrets-inherit.secrets-inherit
+        origin: community
+  patterns:
+  - pattern-inside: "jobs:\n  ...\n"
+  - pattern: 'secrets: inherit'
+- id: yaml.github-actions.security.workflow-run-target-code-checkout.workflow-run-target-code-checkout
+  languages:
+  - yaml
+  message: This GitHub Actions workflow file uses `workflow_run` and checks out code from the incoming pull request. When
+    using `workflow_run`, the Action runs in the context of the target repository, which includes access to all repository
+    secrets. Normally, this is safe because the Action only runs code from the target repository, not the incoming PR. However,
+    by checking out the incoming PR code, you're now using the incoming code for the rest of the action. You may be inadvertently
+    executing arbitrary code from the incoming PR with access to repository secrets, which would let an attacker steal repository
+    secrets. This normally happens by running build scripts (e.g., `npm build` and `make`) or dependency installation scripts
+    (e.g., `python setup.py install`). Audit your workflow file to make sure no code from the incoming PR is executed. Please
+    see https://securitylab.github.com/research/github-actions-preventing-pwn-requests/ for additional mitigations.
+  metadata:
+    category: security
+    owasp: A01:2017 - Injection
+    cwe: 'CWE-913: Improper Control of Dynamically-Managed Code Resources'
+    likelihood: MEDIUM
+    impact: MEDIUM
+    confidence: MEDIUM
+    subcategory:
+    - vuln
+    references:
+    - https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+    - https://github.com/justinsteven/advisories/blob/master/2021_github_actions_checkspelling_token_leak_via_advice_symlink.md
+    - https://www.legitsecurity.com/blog/github-privilege-escalation-vulnerability
+    technology:
+    - github-actions
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Code Injection
+    source: https://semgrep.dev/r/yaml.github-actions.security.workflow-run-target-code-checkout.workflow-run-target-code-checkout
+    shortlink: https://sg.run/A0p6
+    semgrep.dev:
+      rule:
+        r_id: 35494
+        rv_id: 947046
+        rule_id: 4bU8E4
+        version_id: kbTYRwl
+        url: https://semgrep.dev/playground/r/kbTYRwl/yaml.github-actions.security.workflow-run-target-code-checkout.workflow-run-target-code-checkout
+        origin: community
+  patterns:
+  - pattern-inside: "on:\n  ...\n  workflow_run: ...\n  ...\n...\n"
+  - pattern-inside: "jobs:\n  ...\n  $JOBNAME:\n    ...\n    steps:\n      ...\n"
+  - pattern: "...\nuses: \"$ACTION\"\nwith:\n  ...\n  ref: $EXPR\n"
+  - metavariable-regex:
+      metavariable: $ACTION
+      regex: actions/checkout@.*
+  - metavariable-pattern:
+      language: generic
+      metavariable: $EXPR
+      patterns:
+      - pattern: ${{ github.event.workflow_run ... }}
+  severity: WARNING
