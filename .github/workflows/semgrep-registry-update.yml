@@ -152,7 +152,9 @@ jobs:
                   GH_TOKEN: ${{ steps.app-token.outputs.token }}
                   BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
               run: |
-                  number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+                  # --head matches by branch name alone, which a fork PR can
+                  # spoof to wedge this guard — only same-repo PRs count.
+                  number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository == false)][0].number // empty')
                   if [ -z "$number" ]; then
                     echo "skip=false" >> "$GITHUB_OUTPUT"
                     exit 0
