@@ -2,8 +2,10 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 import semgrep_registry
 
@@ -18,6 +20,37 @@ def fake_urlopen(payloads: dict[str, list[dict]]):
         return io.BytesIO(json.dumps({"rules": payloads[registry_id]}).encode("utf-8"))
 
     return urlopen
+
+
+class FetchRetryTest(unittest.TestCase):
+    def flaky_urlopen(self, failures: int):
+        calls = {"count": 0}
+
+        def urlopen(request: urllib.request.Request, timeout: int = 0) -> io.BytesIO:
+            calls["count"] += 1
+            if calls["count"] <= failures:
+                raise urllib.error.URLError("connection reset")
+            return io.BytesIO(json.dumps({"rules": [rule("a")]}).encode("utf-8"))
+
+        return urlopen, calls
+
+    def test_fetch_recovers_from_transient_failures(self) -> None:
+        urlopen, calls = self.flaky_urlopen(failures=semgrep_registry.FETCH_ATTEMPTS - 1)
+
+        with mock.patch.object(semgrep_registry, "FETCH_BACKOFF_SECONDS", 0):
+            rules = semgrep_registry.fetch_registry_rules("p/test", urlopen)
+
+        self.assertEqual([r["id"] for r in rules], ["a"])
+        self.assertEqual(calls["count"], semgrep_registry.FETCH_ATTEMPTS)
+
+    def test_fetch_raises_after_exhausting_attempts(self) -> None:
+        urlopen, calls = self.flaky_urlopen(failures=semgrep_registry.FETCH_ATTEMPTS)
+
+        with mock.patch.object(semgrep_registry, "FETCH_BACKOFF_SECONDS", 0):
+            with self.assertRaisesRegex(RuntimeError, "Could not fetch .*p/test"):
+                semgrep_registry.fetch_registry_rules("p/test", urlopen)
+
+        self.assertEqual(calls["count"], semgrep_registry.FETCH_ATTEMPTS)
 
 
 class DiffTest(unittest.TestCase):

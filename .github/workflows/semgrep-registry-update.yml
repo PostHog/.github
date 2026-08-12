@@ -242,7 +242,7 @@ jobs:
                   fi
 
             - name: Notify Slack
-              if: steps.slack-payload.outcome == 'success' && env.SLACK_BOT_TOKEN != ''
+              if: steps.slack-payload.outcome == 'success' && env.SLACK_BOT_TOKEN != '' && vars.SEMGREP_REGISTRY_SLACK_CHANNEL_ID != ''
               uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
               with:
                   method: chat.postMessage
@@ -261,7 +261,7 @@ jobs:
             SLACK_BOT_TOKEN: ${{ secrets.SEMGREP_REGISTRY_SLACK_BOT_TOKEN }}
         steps:
             - name: Notify Slack of failure
-              if: env.SLACK_BOT_TOKEN != ''
+              if: env.SLACK_BOT_TOKEN != '' && vars.SEMGREP_REGISTRY_SLACK_CHANNEL_ID != ''
               uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
               with:
                   method: chat.postMessage
