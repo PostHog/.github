@@ -91,19 +91,23 @@ class SyncTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
-    def render(self, summary: dict, dry_run: dict | None = None) -> str:
+    def render(self, summary: dict, dry_runs: dict[str, dict] | None = None) -> str:
         with tempfile.TemporaryDirectory() as directory:
             summary_path = Path(directory, "summary.json")
             summary_path.write_text(json.dumps(summary), encoding="utf-8")
-            dry_run_path = None
-            if dry_run is not None:
-                dry_run_path = Path(directory, "dry-run.json")
-                dry_run_path.write_text(json.dumps(dry_run), encoding="utf-8")
+            dry_run_dir = None
+            if dry_runs is not None:
+                dry_run_dir = Path(directory, "dry-run")
+                dry_run_dir.mkdir()
+                for repo, dry_run in dry_runs.items():
+                    Path(dry_run_dir, repo.replace("/", "__") + ".json").write_text(
+                        json.dumps(dry_run), encoding="utf-8"
+                    )
             out = Path(directory, "report.md")
-            semgrep_registry.report(summary_path, out, dry_run_path, "PostHog/posthog")
+            semgrep_registry.report(summary_path, out, dry_run_dir)
             return out.read_text(encoding="utf-8")
 
-    def test_report_lists_rules_and_dry_run_counts(self) -> None:
+    def test_report_lists_rules_and_per_repo_dry_run_counts(self) -> None:
         markdown = self.render(
             {
                 "changed": True,
@@ -111,17 +115,23 @@ class ReportTest(unittest.TestCase):
                 "snapshots": {"test": {"added": ["new.rule"], "removed": ["old.rule"], "changed": []}},
             },
             {
-                "results": [{"check_id": "new.rule"}, {"check_id": "new.rule"}],
-                "errors": [{"message": "Internal matching error\ndetails"}],
+                "PostHog/posthog": {
+                    "results": [{"check_id": "new.rule"}, {"check_id": "new.rule"}],
+                    "errors": [{"message": "Internal matching error\ndetails"}],
+                },
+                "PostHog/posthog-js": {"results": [], "errors": []},
             },
         )
 
         self.assertIn("| test | 1 | 1 | 0 |", markdown)
         self.assertIn("- `new.rule`", markdown)
         self.assertIn("- `old.rule`", markdown)
+        self.assertIn("## Dry run of added/changed rules against PostHog/posthog", markdown)
         self.assertIn("2 finding(s), 1 analysis error(s).", markdown)
         self.assertIn("| `new.rule` | 2 |", markdown)
         self.assertIn("- Internal matching error", markdown)
+        self.assertIn("## Dry run of added/changed rules against PostHog/posthog-js", markdown)
+        self.assertIn("0 finding(s), 0 analysis error(s).", markdown)
 
     def test_report_without_changes_or_dry_run(self) -> None:
         markdown = self.render({"changed": False, "totals": {"added": 0, "removed": 0, "changed": 0}, "snapshots": {}})

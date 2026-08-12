@@ -4,18 +4,25 @@
 # `p/...` registry configs, so a registry-side rule change can never break CI
 # on unrelated PRs. This workflow re-fetches the packs on a schedule; when the
 # registry has added/removed/changed rules it:
-#   1. dry-runs the added/changed rules against PostHog/posthog to measure the
-#      blast radius (finding counts and analysis errors, without failing),
+#   1. dry-runs the added/changed rules against the critical repos listed in
+#      the SEMGREP_REGISTRY_DRY_RUN_REPOS variable (default PostHog/posthog)
+#      to measure blast radius (finding counts and analysis errors, without
+#      failing),
 #   2. opens/updates a PR bumping the snapshots (merging the PR is the moment
 #      the new rules start being enforced org-wide),
 #   3. notifies Slack so @team-security can fix occurrences before merging.
+# Any job failure also notifies Slack: this is the only path by which the
+# org's rules update, so a silent stall would freeze detection coverage.
 #
 # Required configuration:
 # - SEMGREP_REGISTRY_BOT_APP_ID / SEMGREP_REGISTRY_BOT_PRIVATE_KEY secrets for
 #   a GitHub App with Contents (read & write) and Pull requests (read & write)
 #   on this repository.
 # - SEMGREP_REGISTRY_SLACK_BOT_TOKEN secret and SEMGREP_REGISTRY_SLACK_CHANNEL_ID
-#   repository variable for the Slack notification (skipped when unset).
+#   repository variable for the Slack notifications (skipped when unset).
+# - SEMGREP_REGISTRY_DRY_RUN_REPOS repository variable: list of repos to
+#   dry-run against, space- or comma-separated (optional, defaults to
+#   PostHog/posthog).
 
 name: Semgrep Registry Update
 
@@ -65,34 +72,39 @@ jobs:
                     --out "$RUNNER_TEMP/changed-rules.yaml")
                   echo "count=$count" >> "$GITHUB_OUTPUT"
 
-            - name: Checkout PostHog/posthog for the dry run
+            # Measures what the added/changed rules would flag today across the
+            # repos where registry breakage historically hurts most. Never
+            # fails: the whole point is to see the damage before enforcing
+            # anything. Scans run from inside each clone so the repo's own
+            # .semgrepignore applies.
+            - name: Dry-run added/changed rules against critical repos
               if: steps.sync.outputs.changed == 'true' && steps.changed-rules.outputs.count != '0'
-              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with:
-                  repository: PostHog/posthog
-                  path: posthog-checkout
-                  persist-credentials: false
-
-            # Measures what the added/changed rules would flag today. Never fails:
-            # the whole point is to see the damage before enforcing anything.
-            - name: Dry-run added/changed rules against PostHog/posthog
-              if: steps.sync.outputs.changed == 'true' && steps.changed-rules.outputs.count != '0'
-              # Run from inside the checkout so posthog's .semgrepignore applies.
+              env:
+                  DRY_RUN_REPOS: ${{ vars.SEMGREP_REGISTRY_DRY_RUN_REPOS || 'PostHog/posthog' }}
               run: |
-                  cd posthog-checkout
-                  semgrep \
-                    --config "$RUNNER_TEMP/changed-rules.yaml" \
-                    --json-output "$RUNNER_TEMP/artifact/dry-run.json" \
-                    --metrics=off \
-                    --jobs 4 \
-                    --timeout 300 \
-                    . || true
+                  mkdir -p "$RUNNER_TEMP/artifact/dry-run"
+                  for repo in $(printf '%s' "$DRY_RUN_REPOS" | tr ',' ' '); do
+                    # owner names can't contain underscores, so owner__repo is unambiguous
+                    encoded=$(printf '%s' "$repo" | sed 's|/|__|')
+                    clone_dir="$RUNNER_TEMP/clones/$encoded"
+                    git clone --depth 1 "https://github.com/$repo" "$clone_dir"
+                    (
+                      cd "$clone_dir"
+                      semgrep \
+                        --config "$RUNNER_TEMP/changed-rules.yaml" \
+                        --json-output "$RUNNER_TEMP/artifact/dry-run/$encoded.json" \
+                        --metrics=off \
+                        --jobs 4 \
+                        --timeout 300 \
+                        . || true
+                    )
+                  done
 
             - name: Render report
               if: steps.sync.outputs.changed == 'true'
               run: |
-                  if [ -f "$RUNNER_TEMP/artifact/dry-run.json" ]; then
-                    dry_run_args="--dry-run-json $RUNNER_TEMP/artifact/dry-run.json"
+                  if [ -d "$RUNNER_TEMP/artifact/dry-run" ]; then
+                    dry_run_args="--dry-run-dir $RUNNER_TEMP/artifact/dry-run"
                   else
                     dry_run_args=""
                   fi
@@ -118,6 +130,7 @@ jobs:
         timeout-minutes: 15
         env:
             SLACK_BOT_TOKEN: ${{ secrets.SEMGREP_REGISTRY_SLACK_BOT_TOKEN }}
+            BRANCH: semgrep-registry-update
         steps:
             - name: Generate GitHub App token
               id: app-token
@@ -128,77 +141,133 @@ jobs:
                   permission-contents: write
                   permission-pull-requests: write
 
-            # persist-credentials stays on: the push/PR steps below need the
-            # app token in the git remote.
+            # Refreshing the rolling PR replaces its entire content, but stale
+            # reviews aren't dismissed on push in this repo — so an approval
+            # would silently transfer to rules nobody looked at, and any commit
+            # a reviewer added (an --exclude-rule fix, say) would be discarded.
+            # If the open PR has either, leave it alone and say so in Slack.
+            - name: Check whether the open snapshot PR is safe to refresh
+              id: guard
+              env:
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
+              run: |
+                  number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+                  if [ -z "$number" ]; then
+                    echo "skip=false" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+                  url=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json url --jq .url)
+                  approvals=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json reviews \
+                    --jq '[.reviews[] | select(.state == "APPROVED")] | length')
+                  foreign=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json commits \
+                    --jq --arg bot "$BOT_LOGIN" '[.commits[] | select([.authors[].login] | index($bot) | not)] | length')
+                  echo "PR #$number: $approvals approval(s), $foreign non-bot commit(s)"
+                  if [ "$approvals" != "0" ] || [ "$foreign" != "0" ]; then
+                    echo "skip=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "skip=false" >> "$GITHUB_OUTPUT"
+                  fi
+                  echo "url=$url" >> "$GITHUB_OUTPUT"
+
             - name: Checkout
+              if: steps.guard.outputs.skip != 'true'
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
-                  token: ${{ steps.app-token.outputs.token }}
+                  persist-credentials: false
 
             - name: Download update artifact
+              if: steps.guard.outputs.skip != 'true'
               uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
               with:
                   name: registry-update
                   path: ${{ runner.temp }}/artifact
 
             - name: Apply snapshots
+              if: steps.guard.outputs.skip != 'true'
               run: |
                   rm -rf .semgrep/registry
                   cp -R "$RUNNER_TEMP/artifact/registry" .semgrep/registry
 
-            # A fixed branch keeps this to a single rolling PR: reruns force-push
-            # the latest snapshots and refresh the body instead of stacking PRs.
+            # The org requires signed commits on every branch (ruleset
+            # 20431901), so the commit must be created through GitHub's API —
+            # sign-commits does that and GitHub signs it server-side. A plain
+            # `git commit && git push` would be rejected with GH006. The fixed
+            # branch keeps this to a single rolling PR: reruns replace the
+            # snapshot commit and refresh the body instead of stacking PRs,
+            # and identical content results in no push and no notification.
             - name: Create or update pull request
               id: pr
-              env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
-                  BRANCH: semgrep-registry-update
-                  TITLE: 'chore(semgrep): update pinned registry rule snapshots'
-              run: |
-                  git add .semgrep/registry
-                  if git diff --cached --quiet; then
-                    echo "Snapshots already match main; nothing to propose."
-                    echo "url=" >> "$GITHUB_OUTPUT"
-                    exit 0
-                  fi
-                  git config user.name "semgrep-registry-update[bot]"
-                  git config user.email "semgrep-registry-update[bot]@users.noreply.github.com"
-                  git checkout -b "$BRANCH"
-                  git commit -m "$TITLE"
-                  git push --force origin "$BRANCH"
-                  existing=$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')
-                  if [ -n "$existing" ]; then
-                    gh pr edit "$existing" --body-file "$RUNNER_TEMP/artifact/report.md"
-                    echo "url=$existing" >> "$GITHUB_OUTPUT"
-                  else
-                    url=$(gh pr create --title "$TITLE" --body-file "$RUNNER_TEMP/artifact/report.md" --head "$BRANCH")
-                    echo "url=$url" >> "$GITHUB_OUTPUT"
-                  fi
+              if: steps.guard.outputs.skip != 'true'
+              uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+              with:
+                  token: ${{ steps.app-token.outputs.token }}
+                  sign-commits: true
+                  branch: semgrep-registry-update
+                  delete-branch: true
+                  add-paths: .semgrep/registry
+                  commit-message: 'chore(semgrep): update pinned registry rule snapshots'
+                  title: 'chore(semgrep): update pinned registry rule snapshots'
+                  body-path: ${{ runner.temp }}/artifact/report.md
 
             - name: Build Slack payload
               id: slack-payload
-              if: steps.pr.outputs.url != ''
+              if: >-
+                  steps.guard.outputs.skip == 'true'
+                  || steps.pr.outputs['pull-request-operation'] == 'created'
+                  || steps.pr.outputs['pull-request-operation'] == 'updated'
               env:
-                  PR_URL: ${{ steps.pr.outputs.url }}
+                  GUARD_SKIP: ${{ steps.guard.outputs.skip }}
+                  GUARD_URL: ${{ steps.guard.outputs.url }}
+                  PR_URL: ${{ steps.pr.outputs['pull-request-url'] }}
                   SLACK_CHANNEL_ID: ${{ vars.SEMGREP_REGISTRY_SLACK_CHANNEL_ID }}
               run: |
-                  jq -n \
-                    --arg channel "$SLACK_CHANNEL_ID" \
-                    --arg pr_url "$PR_URL" \
-                    --slurpfile summary "$RUNNER_TEMP/artifact/summary.json" \
-                    '{
-                      channel: $channel,
-                      text: ("Semgrep registry changed: "
-                        + ($summary[0].totals.added | tostring) + " added, "
-                        + ($summary[0].totals.changed | tostring) + " changed, "
-                        + ($summary[0].totals.removed | tostring) + " removed rule(s). "
-                        + "These are NOT enforced until the snapshot PR merges: " + $pr_url)
-                    }' > "$RUNNER_TEMP/slack-payload.json"
+                  if [ "$GUARD_SKIP" = "true" ]; then
+                    text="Semgrep registry changed, but the open snapshot PR has reviews or extra commits, so it was left untouched. Merge or close it to resume refreshes: $GUARD_URL"
+                    jq -n --arg channel "$SLACK_CHANNEL_ID" --arg text "$text" \
+                      '{channel: $channel, text: $text}' > "$RUNNER_TEMP/slack-payload.json"
+                  else
+                    jq -n \
+                      --arg channel "$SLACK_CHANNEL_ID" \
+                      --arg pr_url "$PR_URL" \
+                      --slurpfile summary "$RUNNER_TEMP/artifact/summary.json" \
+                      '{
+                        channel: $channel,
+                        text: ("Semgrep registry changed: "
+                          + ($summary[0].totals.added | tostring) + " added, "
+                          + ($summary[0].totals.changed | tostring) + " changed, "
+                          + ($summary[0].totals.removed | tostring) + " removed rule(s). "
+                          + "These are NOT enforced until the snapshot PR merges: " + $pr_url)
+                      }' > "$RUNNER_TEMP/slack-payload.json"
+                  fi
 
             - name: Notify Slack
-              if: steps.pr.outputs.url != '' && env.SLACK_BOT_TOKEN != ''
+              if: steps.slack-payload.outcome == 'success' && env.SLACK_BOT_TOKEN != ''
               uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
               with:
                   method: chat.postMessage
                   token: ${{ secrets.SEMGREP_REGISTRY_SLACK_BOT_TOKEN }}
                   payload-file-path: ${{ runner.temp }}/slack-payload.json
+
+    # This workflow is the only path by which the org's Semgrep rules update,
+    # so a failure must not be silent: it means detection coverage is frozen
+    # at the last merged snapshot until someone notices.
+    notify-failure:
+        needs: [detect, propose]
+        if: always() && contains(needs.*.result, 'failure')
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        env:
+            SLACK_BOT_TOKEN: ${{ secrets.SEMGREP_REGISTRY_SLACK_BOT_TOKEN }}
+        steps:
+            - name: Notify Slack of failure
+              if: env.SLACK_BOT_TOKEN != ''
+              uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
+              with:
+                  method: chat.postMessage
+                  token: ${{ secrets.SEMGREP_REGISTRY_SLACK_BOT_TOKEN }}
+                  payload: |
+                      {
+                          "channel": "${{ vars.SEMGREP_REGISTRY_SLACK_CHANNEL_ID }}",
+                          "text": "Semgrep registry update failed — rule snapshots are NOT refreshing until this is fixed: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                      }

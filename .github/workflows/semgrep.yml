@@ -25,12 +25,21 @@ jobs:
         steps:
             - name: Checkout
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
 
             - name: Checkout .github repo (for custom semgrep rules)
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   repository: PostHog/.github
                   path: dotgithub-repo
+                  persist-credentials: false
+                  # Rules normally resolve from main, but when the repo being
+                  # scanned IS PostHog/.github, use the triggering commit so a
+                  # PR changing rules or registry snapshots is gated by its own
+                  # content — the --strict run below is what catches registry
+                  # rules that fail to parse or analyze before they can merge.
+                  ref: ${{ github.repository == 'PostHog/.github' && github.sha || '' }}
                   sparse-checkout: |
                       .semgrep
                       .github/scripts

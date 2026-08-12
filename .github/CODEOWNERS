@@ -3,5 +3,9 @@
 .github/ @PostHog/team-security
 workflows/ @PostHog/team-security
 
+# semgrep rules and pinned registry snapshots are loaded from main by scan
+# workflows org-wide, so changes here alter detection coverage everywhere
+.semgrep/ @PostHog/team-security
+
 # we explicitly want this Action to be owned by security, even if the above rules are removed
 .github/workflows/ci-security.yaml @PostHog/team-security

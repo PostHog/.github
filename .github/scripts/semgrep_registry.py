@@ -11,8 +11,8 @@ Commands:
                     files, and (optionally) write a JSON diff summary.
     changed-rules   Emit a rules file containing only the added/changed rule
                     definitions from a `sync` summary, for dry-run scans.
-    report          Render a `sync` summary (plus an optional dry-run scan's
-                    JSON output) as markdown for the update PR body.
+    report          Render a `sync` summary (plus optional dry-run scan
+                    outputs) as markdown for the update PR body.
 """
 
 from __future__ import annotations
@@ -168,8 +168,8 @@ def changed_rules(registry_dir: Path, summary_path: Path, out_path: Path) -> int
     return len(rules)
 
 
-def report(summary_path: Path, out_path: Path, dry_run_path: Path | None, dry_run_repo: str) -> None:
-    """Render the sync summary (and optional dry-run scan output) as markdown."""
+def report(summary_path: Path, out_path: Path, dry_run_dir: Path | None) -> None:
+    """Render the sync summary (and optional per-repo dry-run scan outputs) as markdown."""
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     lines = ["## Semgrep registry snapshot changes", ""]
 
@@ -189,11 +189,14 @@ def report(summary_path: Path, out_path: Path, dry_run_path: Path | None, dry_ru
                 lines.extend(["", f"### {label} rules", ""])
                 lines.extend(f"- `{rule_id}`" for rule_id in rule_ids)
 
-    if dry_run_path is not None:
+    for dry_run_path in sorted(dry_run_dir.glob("*.json")) if dry_run_dir else []:
+        # File names encode the scanned repo as owner__repo; owner names
+        # can't contain underscores, so the first "__" is the separator.
+        repo = dry_run_path.stem.replace("__", "/", 1)
         dry_run = json.loads(dry_run_path.read_text(encoding="utf-8"))
         results = dry_run.get("results") or []
         errors = dry_run.get("errors") or []
-        lines.extend(["", f"## Dry run of added/changed rules against {dry_run_repo}", ""])
+        lines.extend(["", f"## Dry run of added/changed rules against {repo}", ""])
         lines.append(f"{len(results)} finding(s), {len(errors)} analysis error(s).")
         if results:
             counts: dict[str, int] = {}
@@ -235,8 +238,9 @@ def main() -> int:
     report_parser = subparsers.add_parser("report", help="Render a sync summary as markdown")
     report_parser.add_argument("--summary", type=Path, required=True)
     report_parser.add_argument("--out", type=Path, required=True)
-    report_parser.add_argument("--dry-run-json", type=Path, help="Semgrep JSON output from a dry-run scan")
-    report_parser.add_argument("--dry-run-repo", default="PostHog/posthog")
+    report_parser.add_argument(
+        "--dry-run-dir", type=Path, help="Directory of per-repo semgrep JSON outputs named owner__repo.json"
+    )
 
     arguments = parser.parse_args()
     if arguments.command == "sync":
@@ -244,7 +248,7 @@ def main() -> int:
     elif arguments.command == "changed-rules":
         changed_rules(arguments.registry_dir, arguments.summary, arguments.out)
     else:
-        report(arguments.summary, arguments.out, arguments.dry_run_json, arguments.dry_run_repo)
+        report(arguments.summary, arguments.out, arguments.dry_run_dir)
     return 0
 
 

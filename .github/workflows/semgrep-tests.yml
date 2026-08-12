@@ -20,12 +20,23 @@ jobs:
         steps:
             - name: Checkout
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
 
             # Scoped to rules/ — .semgrep/registry/ holds vendored registry
             # snapshots, which have no test fixtures.
             - name: Test custom Semgrep rules
               run: |
                   semgrep --test .semgrep/rules/
+
+            # Gates snapshot-bump PRs: every vendored pack must at least load
+            # as a valid rules file, including the ones no workflow in this
+            # repo scans with (the language packs consumed by PostHog/posthog).
+            - name: Validate registry snapshots
+              run: |
+                  for f in .semgrep/registry/*.yaml; do
+                    semgrep --validate --metrics=off --config "$f"
+                  done
 
             - name: Test Semgrep result reporting
               run: |
