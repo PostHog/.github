@@ -51,6 +51,12 @@ jobs:
                   # Local generic-parser replacements preserve their coverage. Remove both exclusions and the
                   # replacements after https://github.com/semgrep/semgrep-rules/issues/3688 is fixed and the
                   # compatibility fixture passes with p/github-actions under --strict.
+                  #
+                  # --timeout raises semgrep's 5s per-rule-per-file default, which a contended
+                  # GitHub-hosted runner trips on a large workflow file. Under --strict a rule
+                  # timeout is an error, so that reds this required check across the org for a
+                  # reason unrelated to the diff. 60s keeps the worst case (three rules hitting
+                  # --timeout-threshold on one file) well inside the job's timeout-minutes.
                   semgrep \
                     --config "dotgithub-repo/.semgrep/rules/" \
                     --config "p/owasp-top-ten" \
@@ -64,6 +70,7 @@ jobs:
                     --exclude-rule yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command \
                     --exclude-rule yaml.github-actions.security.curl-eval.curl-eval \
                     --exclude-rule yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell \
+                    --timeout 60 \
                     --error \
                     --strict \
                     --json-output "$RUNNER_TEMP/semgrep.json" \
