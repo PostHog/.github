@@ -28,6 +28,55 @@ for (const entry of workspaceListing) {
 }
 const knownNames = new Set(Object.values(dirToName));
 
+// Optional per-repo hygiene config (.changeset/hygiene.json, all keys optional):
+//   {
+//     "releasePackagePaths": { "packages/rrweb/": "posthog-js" },
+//     "transitiveReExports": { "<source-pkg>": ["<re-exporter>"] }
+//   }
+//
+// releasePackagePaths replaces workspace ownership for files under a repo-relative
+// directory with the package that ships them. Targets must be known workspace
+// packages. Trailing slashes are optional; the most specific directory wins.
+// This makes bundled sources require only the shipping package's changeset,
+// without incorrectly reporting that changeset as extra.
+//
+// transitiveReExports allows a re-exporter's changeset when its source package
+// has both source changes and a changeset (e.g. Gradle api(project(":x"))).
+let transitiveReExports = {};
+let releasePackagePaths = [];
+const hygieneConfigPath = '.changeset/hygiene.json';
+if (existsSync(hygieneConfigPath)) {
+    try {
+        const cfg = JSON.parse(readFileSync(hygieneConfigPath, 'utf8'));
+        if (cfg.transitiveReExports && typeof cfg.transitiveReExports === 'object') {
+            transitiveReExports = cfg.transitiveReExports;
+        }
+        if (
+            cfg.releasePackagePaths &&
+            typeof cfg.releasePackagePaths === 'object' &&
+            !Array.isArray(cfg.releasePackagePaths)
+        ) {
+            releasePackagePaths = Object.entries(cfg.releasePackagePaths)
+                .map(([dir, name]) => [dir.replace(/\/$/, ''), name])
+                .filter(([dir, name]) => {
+                    if (
+                        dir.split('/').some((part) => !part || part === '.' || part === '..') ||
+                        !knownNames.has(name)
+                    ) {
+                        process.stderr.write(
+                            `Ignoring invalid releasePackagePaths entry in ${hygieneConfigPath}: ${dir} -> ${name}\n`,
+                        );
+                        return false;
+                    }
+                    return true;
+                })
+                .sort(([a], [b]) => b.length - a.length);
+        }
+    } catch (e) {
+        process.stderr.write(`Could not parse ${hygieneConfigPath}: ${e.message}\n`);
+    }
+}
+
 // 2. Diff vs base.
 const mergeBase = sh(`git merge-base origin/${baseRef} HEAD`);
 const changedFiles = sh(`git diff --name-only ${mergeBase}...HEAD`).split('\n').filter(Boolean);
@@ -38,6 +87,13 @@ const affected = new Set();
 for (const file of changedFiles) {
     if (file.startsWith('.changeset/')) continue;
     if (ignoreSuffixes.some((s) => file.endsWith(s))) continue;
+    const releasePackage = releasePackagePaths.find(
+        ([dir]) => file === dir || file.startsWith(dir + '/'),
+    );
+    if (releasePackage) {
+        affected.add(releasePackage[1]);
+        continue;
+    }
     for (const [dir, name] of Object.entries(dirToName)) {
         if (file === dir || file.startsWith(dir + '/')) {
             affected.add(name);
@@ -52,34 +108,6 @@ const changesetFiles = sh(
 )
     .split('\n')
     .filter((f) => f.endsWith('.md') && !f.endsWith('README.md'));
-
-// 4.5. Optional per-repo hygiene config for transitive re-exports.
-//
-// Schema (.changeset/hygiene.json, all keys optional):
-//   {
-//     "transitiveReExports": {
-//       "<source-pkg>": ["<re-exporter-1>", "<re-exporter-2>"]
-//     }
-//   }
-//
-// When <source-pkg> has source changes AND is declared in a changeset on this
-// PR, declaring any of its re-exporters is treated as legitimate even if no
-// source files in that re-exporter changed. Use for cases the workspace graph
-// can't see — e.g. Gradle `api(project(":x"))` re-exports where a downstream
-// artifact must be republished to deliver an upstream core change to its own
-// consumers.
-let transitiveReExports = {};
-const hygieneConfigPath = '.changeset/hygiene.json';
-if (existsSync(hygieneConfigPath)) {
-    try {
-        const cfg = JSON.parse(readFileSync(hygieneConfigPath, 'utf8'));
-        if (cfg.transitiveReExports && typeof cfg.transitiveReExports === 'object') {
-            transitiveReExports = cfg.transitiveReExports;
-        }
-    } catch (e) {
-        process.stderr.write(`Could not parse ${hygieneConfigPath}: ${e.message}\n`);
-    }
-}
 
 const writeOutput = (body) => {
     if (!body) {
