@@ -18,7 +18,13 @@ There is no build step and no app. Changes are config (YAML workflows, semgrep r
 
 ## Testing
 
-No general test suite. The one locally runnable thing is the semgrep rule tests:
+No general test suite. Run the changeset hygiene script tests with:
+
+```bash
+node --test .github/scripts/check-changeset-coverage.test.mjs
+```
+
+The semgrep rule tests run with:
 
 ```bash
 semgrep --test .semgrep/
