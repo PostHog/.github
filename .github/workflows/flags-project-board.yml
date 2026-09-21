@@ -11,6 +11,11 @@
 # - Set the status of the PR to 'In Review'
 # When changes are requested on a PR review, the workflow will:
 # - Set the status of the PR to 'In Progress'
+# When a PR review approves the PR, the workflow will:
+# - Set the status of the PR to 'Approved', unless posthog[bot] wrote the PR and stamphog[bot] approved it
+# Review events only update boards that already hold the PR, and only reach this workflow
+# from callers that trigger on pull_request_review. Such a caller replaces the board's built-in
+# 'Code review approved' workflow, which cannot filter by author or reviewer.
 # A single PR can be added to multiple boards if reviewers from multiple teams are requested.
 #
 # Required GitHub App permissions:
@@ -221,47 +226,89 @@ jobs:
 
                       const matchingBoards = [];
 
-                      for (const config of teamBoardConfig) {
-                          const teamSlug = config.team_slug;
-                          core.info(`Checking team '${teamSlug}'…`);
+                      if (context.eventName === 'pull_request_review') {
+                          const review = context.payload.review;
+                          const reviewStatus = { approved: 'Approved', changes_requested: 'In Progress' }[review.state];
+                          // A PR that the PostHog coding agent wrote and only the stamphog review agent
+                          // approved has had no human review, so the card must not read as approved.
+                          const isAgentOnlyApproval =
+                              review.state === 'approved' &&
+                              pr.user.login === 'posthog[bot]' &&
+                              review.user.login === 'stamphog[bot]';
 
-                          const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
-                          let isMemberRequested = false;
-
-                          if (isTeamRequested) {
-                              core.info(`'${teamSlug}' is requested as a reviewer`);
-                          } else if (requestedReviewers.length > 0) {
-                              core.info(`'${teamSlug}' is not requested directly. Checking if any reviewer is a member…`);
-                              const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
-                                  org: owner,
-                                  team_slug: teamSlug,
-                                  per_page: 100
-                              });
-                              isMemberRequested = requestedReviewers.some(reviewer =>
-                                  teamMembers.some(member => member.login === reviewer.login)
-                              );
+                          if (!reviewStatus) {
+                              core.info(`Review state '${review.state}' on PR #${prNumber} does not change the board status.`);
+                          } else if (pr.state !== 'open') {
+                              core.info(`PR #${prNumber} is ${pr.state}. Leaving the board status unchanged.`);
+                          } else if (isAgentOnlyApproval) {
+                              core.info(`PR #${prNumber} by '${pr.user.login}' was approved by '${review.user.login}'. Leaving the board status unchanged.`);
                           } else {
-                              core.info(`No reviewers requested. Skipping team '${teamSlug}'.`);
+                              // GitHub removes a reviewer from the requested reviewers when they submit a
+                              // review, so match on the boards that already hold the PR instead.
+                              const itemsResult = await github.graphql(`
+                                query($nodeId: ID!) {
+                                  node(id: $nodeId) {
+                                    ... on PullRequest {
+                                      projectItems(first: 100) {
+                                        nodes {
+                                          project {
+                                            id
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              `, { nodeId });
+                              const boardsHoldingPr = new Set(itemsResult.node.projectItems.nodes.map(item => item.project.id));
+
+                              for (const config of teamBoardConfig) {
+                                  if (boardsHoldingPr.has(config.project_v2_id)) {
+                                      core.info(`Review '${review.state}' on PR #${prNumber}. Setting status to '${reviewStatus}' on '${config.team_slug}' board.`);
+                                      matchingBoards.push({
+                                          team_slug: config.team_slug,
+                                          project_v2_id: config.project_v2_id,
+                                          desired_status: reviewStatus
+                                      });
+                                  }
+                              }
                           }
+                      } else {
+                          for (const config of teamBoardConfig) {
+                              const teamSlug = config.team_slug;
+                              core.info(`Checking team '${teamSlug}'…`);
 
-                          if (isTeamRequested || isMemberRequested) {
-                              let desiredStatus;
+                              const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
+                              let isMemberRequested = false;
 
-                              if (context.eventName === 'pull_request_review' && context.payload.review.state === 'changes_requested') {
-                                  desiredStatus = 'In Progress';
-                                  core.info(`Changes requested on PR #${prNumber}. Setting status to '${desiredStatus}' on '${teamSlug}' board.`);
+                              if (isTeamRequested) {
+                                  core.info(`'${teamSlug}' is requested as a reviewer`);
+                              } else if (requestedReviewers.length > 0) {
+                                  core.info(`'${teamSlug}' is not requested directly. Checking if any reviewer is a member…`);
+                                  const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
+                                      org: owner,
+                                      team_slug: teamSlug,
+                                      per_page: 100
+                                  });
+                                  isMemberRequested = requestedReviewers.some(reviewer =>
+                                      teamMembers.some(member => member.login === reviewer.login)
+                                  );
                               } else {
-                                  desiredStatus = isDraft ? 'In Progress' : 'In Review';
-                                  core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${desiredStatus}'.`);
+                                  core.info(`No reviewers requested. Skipping team '${teamSlug}'.`);
                               }
 
-                              matchingBoards.push({
-                                  team_slug: teamSlug,
-                                  project_v2_id: config.project_v2_id,
-                                  desired_status: desiredStatus
-                              });
-                          } else {
-                              core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
+                              if (isTeamRequested || isMemberRequested) {
+                                  const desiredStatus = isDraft ? 'In Progress' : 'In Review';
+                                  core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${desiredStatus}'.`);
+
+                                  matchingBoards.push({
+                                      team_slug: teamSlug,
+                                      project_v2_id: config.project_v2_id,
+                                      desired_status: desiredStatus
+                                  });
+                              } else {
+                                  core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
+                              }
                           }
                       }
 
