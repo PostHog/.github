@@ -221,10 +221,16 @@ jobs:
 
                       core.info(`Evaluating PR #${prNumber} (draft: ${isDraft})`);
 
-                      const requestedTeams = pr.requested_teams || [];
-                      const requestedReviewers = pr.requested_reviewers || [];
-
-                      const matchingBoards = [];
+                      const setOutputs = (boards) => {
+                          core.info(`Matched ${boards.length} board(s).`);
+                          core.setOutput('has_matches', (boards.length > 0).toString());
+                          core.setOutput('matching_boards', JSON.stringify({
+                              boards,
+                              pr_number: prNumber.toString(),
+                              pr_title: pr.title || `#${prNumber}`
+                          }));
+                          core.setOutput('pr_node_id', nodeId);
+                      };
 
                       if (context.eventName === 'pull_request_review') {
                           const review = context.payload.review;
@@ -236,90 +242,80 @@ jobs:
                               pr.user.login === 'posthog[bot]' &&
                               review.user.login === 'stamphog[bot]';
 
-                          if (!reviewStatus) {
-                              core.info(`Review state '${review.state}' on PR #${prNumber} does not change the board status.`);
-                          } else if (pr.state !== 'open') {
-                              core.info(`PR #${prNumber} is ${pr.state}. Leaving the board status unchanged.`);
-                          } else if (isAgentOnlyApproval) {
-                              core.info(`PR #${prNumber} by '${pr.user.login}' was approved by '${review.user.login}'. Leaving the board status unchanged.`);
-                          } else {
-                              // GitHub removes a reviewer from the requested reviewers when they submit a
-                              // review, so match on the boards that already hold the PR instead.
-                              const itemsResult = await github.graphql(`
-                                query($nodeId: ID!) {
-                                  node(id: $nodeId) {
-                                    ... on PullRequest {
-                                      projectItems(first: 100) {
-                                        nodes {
-                                          project {
-                                            id
-                                          }
-                                        }
+                          if (!reviewStatus || pr.state !== 'open' || isAgentOnlyApproval) {
+                              core.info(`Review '${review.state}' by '${review.user.login}' on ${pr.state} PR #${prNumber} does not change the board status.`);
+                              return setOutputs([]);
+                          }
+
+                          // GitHub removes a reviewer from the requested reviewers when they submit a
+                          // review, so match on the boards that already hold the PR instead.
+                          const itemsResult = await github.graphql(`
+                            query($nodeId: ID!) {
+                              node(id: $nodeId) {
+                                ... on PullRequest {
+                                  projectItems(first: 100) {
+                                    nodes {
+                                      project {
+                                        id
                                       }
                                     }
                                   }
                                 }
-                              `, { nodeId });
-                              const boardsHoldingPr = new Set(itemsResult.node.projectItems.nodes.map(item => item.project.id));
-
-                              for (const config of teamBoardConfig) {
-                                  if (boardsHoldingPr.has(config.project_v2_id)) {
-                                      core.info(`Review '${review.state}' on PR #${prNumber}. Setting status to '${reviewStatus}' on '${config.team_slug}' board.`);
-                                      matchingBoards.push({
-                                          team_slug: config.team_slug,
-                                          project_v2_id: config.project_v2_id,
-                                          desired_status: reviewStatus
-                                      });
-                                  }
                               }
+                            }
+                          `, { nodeId });
+                          const boardsHoldingPr = new Set(itemsResult.node.projectItems.nodes.map(item => item.project.id));
+
+                          return setOutputs(
+                              teamBoardConfig
+                                  .filter(config => boardsHoldingPr.has(config.project_v2_id))
+                                  .map(config => ({ ...config, desired_status: reviewStatus }))
+                          );
+                      }
+
+                      const requestedTeams = pr.requested_teams || [];
+                      const requestedReviewers = pr.requested_reviewers || [];
+
+                      const matchingBoards = [];
+
+                      for (const config of teamBoardConfig) {
+                          const teamSlug = config.team_slug;
+                          core.info(`Checking team '${teamSlug}'…`);
+
+                          const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
+                          let isMemberRequested = false;
+
+                          if (isTeamRequested) {
+                              core.info(`'${teamSlug}' is requested as a reviewer`);
+                          } else if (requestedReviewers.length > 0) {
+                              core.info(`'${teamSlug}' is not requested directly. Checking if any reviewer is a member…`);
+                              const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
+                                  org: owner,
+                                  team_slug: teamSlug,
+                                  per_page: 100
+                              });
+                              isMemberRequested = requestedReviewers.some(reviewer =>
+                                  teamMembers.some(member => member.login === reviewer.login)
+                              );
+                          } else {
+                              core.info(`No reviewers requested. Skipping team '${teamSlug}'.`);
                           }
-                      } else {
-                          for (const config of teamBoardConfig) {
-                              const teamSlug = config.team_slug;
-                              core.info(`Checking team '${teamSlug}'…`);
 
-                              const isTeamRequested = requestedTeams.some(t => t.slug === teamSlug);
-                              let isMemberRequested = false;
+                          if (isTeamRequested || isMemberRequested) {
+                              const desiredStatus = isDraft ? 'In Progress' : 'In Review';
+                              core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${desiredStatus}'.`);
 
-                              if (isTeamRequested) {
-                                  core.info(`'${teamSlug}' is requested as a reviewer`);
-                              } else if (requestedReviewers.length > 0) {
-                                  core.info(`'${teamSlug}' is not requested directly. Checking if any reviewer is a member…`);
-                                  const { data: teamMembers } = await github.rest.teams.listMembersInOrg({
-                                      org: owner,
-                                      team_slug: teamSlug,
-                                      per_page: 100
-                                  });
-                                  isMemberRequested = requestedReviewers.some(reviewer =>
-                                      teamMembers.some(member => member.login === reviewer.login)
-                                  );
-                              } else {
-                                  core.info(`No reviewers requested. Skipping team '${teamSlug}'.`);
-                              }
-
-                              if (isTeamRequested || isMemberRequested) {
-                                  const desiredStatus = isDraft ? 'In Progress' : 'In Review';
-                                  core.info(`${isDraft ? 'Draft ' : ''}PR #${prNumber} has a reviewer from '${teamSlug}'. Setting status to '${desiredStatus}'.`);
-
-                                  matchingBoards.push({
-                                      team_slug: teamSlug,
-                                      project_v2_id: config.project_v2_id,
-                                      desired_status: desiredStatus
-                                  });
-                              } else {
-                                  core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
-                              }
+                              matchingBoards.push({
+                                  team_slug: teamSlug,
+                                  project_v2_id: config.project_v2_id,
+                                  desired_status: desiredStatus
+                              });
+                          } else {
+                              core.info(`PR #${prNumber} is not relevant to team '${teamSlug}'. Skipping.`);
                           }
                       }
 
-                      core.info(`Matched ${matchingBoards.length} board(s).`);
-                      core.setOutput('has_matches', (matchingBoards.length > 0).toString());
-                      core.setOutput('matching_boards', JSON.stringify({
-                          boards: matchingBoards,
-                          pr_number: prNumber.toString(),
-                          pr_title: pr.title || `#${prNumber}`
-                      }));
-                      core.setOutput('pr_node_id', nodeId);
+                      setOutputs(matchingBoards);
             - name: Update Project Boards
               if: steps.check.outputs.has_matches == 'true'
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
