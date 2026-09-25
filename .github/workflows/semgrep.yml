@@ -50,6 +50,10 @@ jobs:
 
                   echo "exists=true" >> "$GITHUB_OUTPUT"
 
+                  # The job container runs git as root, but the runner user owns the checkout, so git
+                  # refuses the repo as "dubious ownership" and every check below falls through to a scan.
+                  git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
                   # The merge queue can combine several PRs, so it always gets full coverage.
                   if [ "$EVENT_NAME" != "pull_request" ] || ! git rev-parse --verify HEAD^1 >/dev/null 2>&1; then
                     echo "scan=true" >> "$GITHUB_OUTPUT"
@@ -75,6 +79,12 @@ jobs:
                   # timeout is an error, so that reds this required check across the org for a
                   # reason unrelated to the diff. 60s keeps the worst case (three rules hitting
                   # --timeout-threshold on one file) well inside the job's timeout-minutes.
+                  #
+                  # The trailofbits Ansible rules target playbook task keys, not workflow YAML. Each one binds
+                  # every YAML key through metavariable-pattern, and semgrep evaluates each binding by writing
+                  # it to a temp file, re-parsing it and deleting it behind a global lock. On large workflow
+                  # files that filesystem work makes up almost all of the scan time, and on a slow runner it
+                  # pushes the scan past timeout-minutes.
                   semgrep \
                     --config "dotgithub-repo/.semgrep/rules/" \
                     --config "p/owasp-top-ten" \
@@ -85,6 +95,22 @@ jobs:
                     --exclude-rule dockerfile.security.no-sudo-in-dockerfile.no-sudo-in-dockerfile \
                     --exclude-rule trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport \
                     --exclude-rule trailofbits.yaml.docker-compose.port-all-interfaces.port-all-interfaces \
+                    --exclude-rule trailofbits.yaml.ansible.apt-key-unencrypted-url.apt-key-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.apt-key-validate-certs-disabled.apt-key-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.apt-unencrypted-url.apt-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.dnf-unencrypted-url.dnf-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.dnf-validate-certs-disabled.dnf-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.get-url-unencrypted-url.get-url-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.get-url-validate-certs-disabled.get-url-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.rpm-key-unencrypted-url.rpm-key-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.rpm-key-validate-certs-disabled.rpm-key-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.unarchive-unencrypted-url.unarchive-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.unarchive-validate-certs-disabled.unarchive-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.wrm-cert-validation-ignore.wrm-cert-validation-ignore \
+                    --exclude-rule trailofbits.yaml.ansible.yum-unencrypted-url.yum-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.yum-validate-certs-disabled.yum-validate-certs-disabled \
+                    --exclude-rule trailofbits.yaml.ansible.zypper-repository-unencrypted-url.zypper-repository-unencrypted-url \
+                    --exclude-rule trailofbits.yaml.ansible.zypper-unencrypted-url.zypper-unencrypted-url \
                     --exclude-rule yaml.github-actions.security.audit.unsafe-add-mask-workflow-command.unsafe-add-mask-workflow-command \
                     --exclude-rule yaml.github-actions.security.curl-eval.curl-eval \
                     --exclude-rule yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell \
