@@ -13,11 +13,10 @@ env:
 jobs:
     # scans the entire repo for package managers missing a minimum release age / cooldown
     semgrep-package-managers:
-        # This workflow runs org-wide as a required workflow. Private/internal repos
-        # get the faster Depot runner; public repos stay on GitHub-hosted ubuntu-latest
-        # (free minutes, and not every public repo has Depot enabled). The repository
-        # context reflects the target repo, so this resolves per-repo automatically.
-        runs-on: ${{ github.event.repository.private && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+        # This workflow runs org-wide as a required workflow. It uses the Depot runner
+        # everywhere. The shared GitHub-hosted ubuntu-latest pool queues this required
+        # check for longer than it runs, so public repos no longer stay on that pool.
+        runs-on: depot-ubuntu-latest
         timeout-minutes: 15
         container:
             image: semgrep/semgrep:1.175.0@sha256:b94b53d02fd4a022f9eac4e2af1380f5c3c4c21400e79d3336bdff1d1db5e796
