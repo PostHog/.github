@@ -1,29 +1,14 @@
 #!/usr/bin/env node
-// Release approval guard, run from PostHog/.github/.github/actions/release-approval-guard.
-//
-// Fails when a person who approved the release environment in this workflow run
-// authored, or committed to, a merged PR whose changeset is part of the release.
-//
-// GitHub's "prevent self-review" environment setting only compares the approver
-// with the run's triggering actor. When a merge queue (GitHub or Trunk) merges,
-// that actor is a bot, so the PR author can approve their own release. A
-// release can also batch changesets from several PRs, and the setting never
-// checked those other authors.
-//
-// Fails closed: any changeset or commit it cannot attribute to a merged PR, or
-// a run without an approval for the environment, blocks the release.
-
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// GitHub sets this committer for commits made in the web UI and for squash merges.
+// GitHub's committer for web UI commits and squash merges.
 const IGNORED_LOGINS = new Set(['web-flow']);
 
 export class GuardError extends Error {}
 
-// Pending changeset files (*.md, except README.md) in the given directories.
 export function listChangesets(dirs, cwd = process.cwd()) {
     const files = [];
     for (const dir of dirs) {
@@ -56,7 +41,6 @@ export function createApi({ token, apiUrl = 'https://api.github.com', fetchImpl 
         async get(path) {
             return (await request(`${apiUrl}${path}`)).json();
         },
-        // Follows Link: rel="next" for list endpoints.
         async list(path) {
             const items = [];
             let url = `${apiUrl}${path}`;
@@ -70,8 +54,7 @@ export function createApi({ token, apiUrl = 'https://api.github.com', fetchImpl 
     };
 }
 
-// Logins that approved `environment` in this run. The API does not say which
-// run attempt an approval belongs to, so every approval in the run counts.
+// Approvals aren't tied to a run attempt, so every approval in the run counts.
 export async function approversFor(api, repo, runId, environment) {
     const approvals = await api.get(`/repos/${repo}/actions/runs/${runId}/approvals`);
     const logins = approvals
@@ -80,8 +63,6 @@ export async function approversFor(api, repo, runId, environment) {
     return [...new Set(logins)].sort();
 }
 
-// login (lowercased) -> { login, reasons: Set } for everyone who authored or
-// committed to a merged PR that touched one of `files` up to `ref`.
 export async function contributorsFor(api, repo, ref, files) {
     const contributors = new Map();
     const add = (login, reason) => {

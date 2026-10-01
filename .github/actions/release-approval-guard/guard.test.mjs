@@ -10,8 +10,6 @@ const repo = 'PostHog/posthog-js';
 const ref = 'head-sha';
 const API = 'https://api.github.test';
 
-// Fake GitHub API: `routes` maps a path (with query) to a JSON body, or to an
-// array of pages for paginated list endpoints.
 function fakeApi(routes) {
     const fetchImpl = async (url) => {
         const path = url.slice(API.length);
@@ -39,7 +37,6 @@ const prCommits = (n) => `/repos/${repo}/pulls/${n}/commits?per_page=100`;
 const pr = (number, login) => ({ number, merged_at: '2026-10-01T00:00:00Z', user: { login } });
 const commit = (author, committer = 'web-flow') => ({ author: { login: author }, committer: { login: committer } });
 
-// One changeset, added by PR #1 from `author`, with the given approvals.
 function singlePr({ author = 'alice', approvals = [approval('bob')], commits = [commit(author)] } = {}) {
     return {
         [`/repos/${repo}/actions/runs/7/approvals`]: approvals,
