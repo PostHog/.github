@@ -35,7 +35,12 @@ const commitsFor = (file) => `/repos/${repo}/commits?sha=${ref}&path=${encodeURI
 const pullsFor = (sha) => `/repos/${repo}/commits/${sha}/pulls`;
 const prCommits = (n) => `/repos/${repo}/pulls/${n}/commits?per_page=100`;
 const pr = (number, login) => ({ number, merged_at: '2026-10-01T00:00:00Z', user: { login } });
-const commit = (author, committer = 'web-flow') => ({ author: { login: author }, committer: { login: committer } });
+const commit = (author, committer = 'web-flow', verified = true) => ({
+    sha: 'abcdef0123',
+    author: author && { login: author },
+    committer: committer && { login: committer },
+    commit: { verification: { verified } },
+});
 
 function singlePr({ author = 'alice', approvals = [approval('bob')], commits = [commit(author)] } = {}) {
     return {
@@ -91,6 +96,17 @@ test('checks every PR in a batched release, including PRs that edited a changese
     const result = await check(routes, ['.changeset/a.md', '.changeset/b.md']);
     assert.deepEqual(result.contributors, ['alice', 'bob', 'carol']);
     assert.deepEqual(result.violations.map((v) => v.login), ['carol']);
+});
+
+test('fails closed when a PR has a commit without a verified signature', async () => {
+    const routes = singlePr({ commits: [commit('alice'), commit('bob', 'bob', false)] });
+    await assert.rejects(check(routes), /abcdef0123 in #1 has no verified signature/);
+});
+
+test('fails closed when a PR reaches the 250-commit listing limit', async () => {
+    const routes = singlePr();
+    routes[prCommits(1)] = [Array(100).fill(commit('alice')), Array(100).fill(commit('alice')), Array(50).fill(commit('alice'))];
+    await assert.rejects(check(routes), /#1 has 250 or more commits/);
 });
 
 test('follows pagination of PR commits', async () => {

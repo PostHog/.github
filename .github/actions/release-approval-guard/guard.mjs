@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 // GitHub's committer for web UI commits and squash merges.
 const IGNORED_LOGINS = new Set(['web-flow']);
+const PR_COMMITS_LIMIT = 250;
 
 export class GuardError extends Error {}
 
@@ -93,7 +94,18 @@ export async function contributorsFor(api, repo, ref, files) {
                 if (seenPrs.has(pr.number)) continue;
                 seenPrs.add(pr.number);
                 add(pr.user?.login, `author of #${pr.number}`);
-                for (const c of await api.list(`/repos/${repo}/pulls/${pr.number}/commits?per_page=100`)) {
+                const prCommits = await api.list(`/repos/${repo}/pulls/${pr.number}/commits?per_page=100`);
+                if (prCommits.length >= PR_COMMITS_LIMIT) {
+                    throw new GuardError(
+                        `#${pr.number} has ${PR_COMMITS_LIMIT} or more commits, the most GitHub lists, so its contributors cannot all be checked.`,
+                    );
+                }
+                for (const c of prCommits) {
+                    if (!c.commit?.verification?.verified) {
+                        throw new GuardError(
+                            `Commit ${c.sha} in #${pr.number} has no verified signature, so its committer cannot be trusted.`,
+                        );
+                    }
                     add(c.author?.login, `commit in #${pr.number}`);
                     add(c.committer?.login, `commit in #${pr.number}`);
                 }
@@ -118,7 +130,11 @@ export async function checkReleaseApproval({ api, repo, runId, environment, ref,
     const violations = approvers
         .filter((login) => contributors.has(login.toLowerCase()))
         .map((login) => ({ login, reasons: [...contributors.get(login.toLowerCase()).reasons] }));
-    return { approvers, contributors: [...contributors.values()].map((c) => c.login).sort(), violations };
+    return {
+        approvers,
+        contributors: [...contributors.values()].map((c) => c.login).sort(),
+        violations,
+    };
 }
 
 async function main() {

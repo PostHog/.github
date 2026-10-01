@@ -29,7 +29,8 @@ The checkout can be shallow. The step reads the changeset files in the working t
 ## Behavior
 
 - Contributors are the author of every merged PR that added or edited a pending changeset, plus the author and committer of every commit in those PRs.
-- It fails closed. It fails if there are no changesets, if the run has no approval for the environment, or if a commit that changed a changeset isn't part of a merged PR.
+- It fails closed. It fails if there are no changesets, if the run has no approval for the environment, if a commit that changed a changeset isn't part of a merged PR, if a PR has 250 or more commits (the most GitHub lists for a PR), or if a PR has a commit without a verified signature.
+- Commit author and committer emails can be set to anything. A verified signature ties the committer to the GitHub account that owns the signing key, so the guard only trusts signed commits. The org's "Require signed commits" ruleset enforces signing on branches in our repos, but not on forks.
 - The approvals API doesn't say which run attempt an approval belongs to, so every approval in the run counts. After a block, a different approver must approve a **new run**. A re-run can still see the blocked approval.
 
 Run the tests with `node --test .github/actions/release-approval-guard/guard.test.mjs`.
