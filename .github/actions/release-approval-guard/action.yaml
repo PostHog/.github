@@ -1,14 +1,10 @@
 name: 'Release approval guard'
-description: 'Fail a release when an approver of its environment authored or committed to a PR in the release'
+description: 'Fail a release when an approver of its environment authored or merged a PR in the push that triggered it'
 
 inputs:
   environment:
     description: 'Name of the environment whose approval gates the release, e.g. "NPM Release"'
     required: true
-  changeset-dirs:
-    description: 'Newline-separated directories, relative to the checkout, that hold the pending changeset .md files'
-    required: false
-    default: '.changeset'
   github-token:
     description: 'Token with `actions: read`, `contents: read` and `pull-requests: read` on the repository'
     required: false
@@ -17,11 +13,10 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Check release approvers against release contributors
+    - name: Check release approvers against the PRs in the push
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         ENVIRONMENT: ${{ inputs.environment }}
-        CHANGESET_DIRS: ${{ inputs.changeset-dirs }}
         ACTION_PATH: ${{ github.action_path }}
       run: node "$ACTION_PATH/guard.mjs"

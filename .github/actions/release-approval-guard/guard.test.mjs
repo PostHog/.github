@@ -1,29 +1,26 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { checkReleaseApproval, createApi, GuardError, listChangesets } from './guard.mjs';
+import { checkReleaseApproval, createApi, GuardError } from './guard.mjs';
 
 const repo = 'PostHog/posthog-js';
-const ref = 'head-sha';
 const API = 'https://api.github.test';
+const before = 'b'.repeat(40);
+const after = 'a'.repeat(40);
 
-function fakeApi(routes) {
+function fakeApi(routes, failures = {}) {
     const fetchImpl = async (url) => {
         const path = url.slice(API.length);
-        const [route, page] = path.split('&page=');
-        if (!(route in routes)) return new Response(`no route ${path}`, { status: 404 });
-        const body = routes[route];
-        if (Array.isArray(body) && Array.isArray(body[0])) {
-            const n = Number(page || 1);
-            const headers = n < body.length ? { link: `<${API}${route}&page=${n + 1}>; rel="next"` } : {};
-            return Response.json(body[n - 1], { headers });
+        if (failures[path] > 0) {
+            failures[path]--;
+            return new Response('unavailable', { status: 502 });
         }
-        return Response.json(body);
+        if (!(path in routes)) return new Response(`no route ${path}`, { status: 404 });
+        return Response.json(routes[path]);
     };
-    return createApi({ token: 't', apiUrl: API, fetchImpl });
+    return createApi({ token: 't', apiUrl: API, fetchImpl, retryDelayMs: 0 });
 }
 
 const approval = (login, environment = 'NPM Release', state = 'approved') => ({
@@ -31,134 +28,120 @@ const approval = (login, environment = 'NPM Release', state = 'approved') => ({
     user: { login },
     environments: [{ name: environment }],
 });
-const commitsFor = (file) => `/repos/${repo}/commits?sha=${ref}&path=${encodeURIComponent(file)}&per_page=100`;
-const pullsFor = (sha) => `/repos/${repo}/commits/${sha}/pulls`;
-const prCommits = (n) => `/repos/${repo}/pulls/${n}/commits?per_page=100`;
-const pr = (number, login) => ({ number, merged_at: '2026-10-01T00:00:00Z', user: { login } });
-const commit = (author, committer = 'web-flow', verified = true) => ({
-    sha: 'abcdef0123',
-    author: author && { login: author },
-    committer: committer && { login: committer },
-    commit: { verification: { verified } },
-});
 
-function singlePr({ author = 'alice', approvals = [approval('bob')], commits = [commit(author)] } = {}) {
-    return {
+// Each entry is [commit sha, PR number, author, merged_by].
+function push(approvals, prs) {
+    const routes = {
         [`/repos/${repo}/actions/runs/7/approvals`]: approvals,
-        [commitsFor('.changeset/a.md')]: [{ sha: 'c1' }],
-        [pullsFor('c1')]: [pr(1, author)],
-        [prCommits(1)]: commits,
+        [`/repos/${repo}/compare/${before}...${after}`]: {
+            total_commits: prs.length,
+            commits: prs.map(([sha]) => ({ sha })),
+        },
     };
+    for (const [sha, number, author, mergedBy] of prs) {
+        routes[`/repos/${repo}/commits/${sha}/pulls`] = [{ number, merged_at: '2026-10-01T00:00:00Z' }];
+        routes[`/repos/${repo}/pulls/${number}`] = {
+            number,
+            user: { login: author },
+            merged_by: mergedBy && { login: mergedBy },
+        };
+    }
+    return routes;
 }
 
-const check = (routes, files = ['.changeset/a.md'], environment = 'NPM Release') =>
-    checkReleaseApproval({ api: fakeApi(routes), repo, runId: 7, environment, ref, files });
+const check = (routes, environment = 'NPM Release') =>
+    checkReleaseApproval({ api: fakeApi(routes), repo, runId: 7, environment, before, after });
 
-test('passes when no approver contributed to the release', async () => {
-    const result = await check(singlePr());
+test('passes when no approver authored or merged a PR in the push', async () => {
+    const result = await check(push([approval('bob')], [['c1', 1, 'alice', 'alice']]));
     assert.deepEqual(result.violations, []);
-    assert.deepEqual(result.approvers, ['bob']);
-    assert.deepEqual(result.contributors, ['alice']);
+    assert.deepEqual(result.prs, [1]);
 });
 
-test('blocks the PR author approving their own release', async () => {
-    const result = await check(singlePr({ approvals: [approval('alice')] }));
-    assert.deepEqual(result.violations, [{ login: 'alice', reasons: ['author of #1', 'commit in #1'] }]);
+test('blocks the PR author', async () => {
+    const result = await check(push([approval('alice')], [['c1', 1, 'alice', 'github-merge-queue[bot]']]));
+    assert.deepEqual(result.violations, [{ login: 'alice', reasons: ['author of #1'] }]);
 });
 
-test('blocks someone who pushed commits to another person\'s PR', async () => {
-    const result = await check(singlePr({ commits: [commit('alice'), commit('bob', 'bob')] }));
-    assert.deepEqual(result.violations, [{ login: 'bob', reasons: ['commit in #1'] }]);
+test('blocks whoever merged the PR', async () => {
+    const result = await check(push([approval('bob')], [['c1', 1, 'external', 'bob']]));
+    assert.deepEqual(result.violations, [{ login: 'bob', reasons: ['merged #1'] }]);
 });
 
-test('matches logins case-insensitively', async () => {
-    const result = await check(singlePr({ approvals: [approval('Alice')] }));
-    assert.equal(result.violations[0].login, 'Alice');
-});
-
-test('blocks when any approval in the run came from a contributor', async () => {
-    const result = await check(singlePr({ approvals: [approval('bob'), approval('alice')] }));
-    assert.deepEqual(result.violations.map((v) => v.login), ['alice']);
-});
-
-test('checks every PR in a batched release, including PRs that edited a changeset', async () => {
-    const routes = {
-        [`/repos/${repo}/actions/runs/7/approvals`]: [approval('carol')],
-        [commitsFor('.changeset/a.md')]: [{ sha: 'c1' }],
-        [commitsFor('.changeset/b.md')]: [{ sha: 'c3' }, { sha: 'c2' }],
-        [pullsFor('c1')]: [pr(1, 'alice')],
-        [pullsFor('c2')]: [pr(2, 'bob')],
-        [pullsFor('c3')]: [pr(3, 'carol')],
-        [prCommits(1)]: [commit('alice')],
-        [prCommits(2)]: [commit('bob')],
-        [prCommits(3)]: [commit('carol')],
-    };
-    const result = await check(routes, ['.changeset/a.md', '.changeset/b.md']);
-    assert.deepEqual(result.contributors, ['alice', 'bob', 'carol']);
+test('checks every PR in a batched merge queue push', async () => {
+    const prs = [
+        ['c1', 1, 'alice', 'alice'],
+        ['c2', 2, 'carol', 'carol'],
+    ];
+    const result = await check(push([approval('carol')], prs));
+    assert.deepEqual(result.prs, [1, 2]);
     assert.deepEqual(result.violations.map((v) => v.login), ['carol']);
 });
 
-test('fails closed when a PR has a commit without a verified signature', async () => {
-    const routes = singlePr({ commits: [commit('alice'), commit('bob', 'bob', false)] });
-    await assert.rejects(check(routes), /abcdef0123 in #1 has no verified signature/);
+test('matches logins case-insensitively', async () => {
+    const result = await check(push([approval('Alice')], [['c1', 1, 'alice', 'alice']]));
+    assert.equal(result.violations[0].login, 'Alice');
 });
 
-test('fails closed when a PR reaches the 250-commit listing limit', async () => {
-    const routes = singlePr();
-    routes[prCommits(1)] = [Array(100).fill(commit('alice')), Array(100).fill(commit('alice')), Array(50).fill(commit('alice'))];
-    await assert.rejects(check(routes), /#1 has 250 or more commits/);
-});
-
-test('follows pagination of PR commits', async () => {
-    const routes = singlePr();
-    routes[prCommits(1)] = [[commit('alice')], [commit('bob')]];
-    const result = await check(routes);
-    assert.deepEqual(result.violations.map((v) => v.login), ['bob']);
+test('blocks when any approval in the run came from an author', async () => {
+    const result = await check(push([approval('bob'), approval('alice')], [['c1', 1, 'alice', 'alice']]));
+    assert.deepEqual(result.violations.map((v) => v.login), ['alice']);
 });
 
 test('ignores approvals that are rejected or for other environments', async () => {
     const approvals = [approval('alice', 'S3 Upload'), approval('alice', 'NPM Release', 'rejected'), approval('bob')];
-    const result = await check(singlePr({ approvals }));
+    const result = await check(push(approvals, [['c1', 1, 'alice', 'alice']]));
     assert.deepEqual(result.approvers, ['bob']);
     assert.deepEqual(result.violations, []);
 });
 
 test('fails closed when the run has no approval for the environment', async () => {
-    await assert.rejects(check(singlePr({ approvals: [approval('bob', 'Other')] })), GuardError);
+    await assert.rejects(check(push([approval('bob', 'Other')], [['c1', 1, 'alice', 'alice']])), GuardError);
 });
 
-test('fails closed when a changeset commit is not from a merged PR', async () => {
-    const routes = singlePr();
-    routes[pullsFor('c1')] = [{ ...pr(1, 'alice'), merged_at: null }];
-    await assert.rejects(check(routes), /does not belong to a merged PR/);
+test('fails closed when a commit in the push is not from a merged PR', async () => {
+    const routes = push([approval('bob')], [['c1', 1, 'alice', 'alice']]);
+    routes[`/repos/${repo}/commits/c1/pulls`] = [{ number: 1, merged_at: null }];
+    await assert.rejects(check(routes), /c1 in the push does not belong to a merged PR/);
 });
 
-test('fails closed when a changeset has no commits', async () => {
-    const routes = singlePr();
-    routes[commitsFor('.changeset/a.md')] = [];
-    await assert.rejects(check(routes), /has no commits/);
+test('fails closed when the comparison does not list every commit', async () => {
+    const routes = push([approval('bob')], [['c1', 1, 'alice', 'alice']]);
+    routes[`/repos/${repo}/compare/${before}...${after}`].total_commits = 300;
+    await assert.rejects(check(routes), /Cannot list all 300 commits/);
 });
 
-test('fails closed when there are no changesets', async () => {
-    await assert.rejects(check(singlePr(), []), /No changesets found/);
+test('fails closed when the push has no previous commit', async () => {
+    const routes = push([approval('bob')], [['c1', 1, 'alice', 'alice']]);
+    await assert.rejects(
+        checkReleaseApproval({ api: fakeApi(routes), repo, runId: 7, environment: 'NPM Release', before: '0'.repeat(40), after }),
+        /has no previous commit/,
+    );
 });
 
 test('surfaces GitHub API errors', async () => {
-    const routes = singlePr();
-    delete routes[prCommits(1)];
+    const routes = push([approval('bob')], [['c1', 1, 'alice', 'alice']]);
+    delete routes[`/repos/${repo}/pulls/1`];
     await assert.rejects(check(routes), /GitHub API 404/);
 });
 
-test('lists pending changesets across directories', (t) => {
-    const cwd = mkdtempSync(join(tmpdir(), 'release-approval-guard-'));
-    t.after(() => rmSync(cwd, { recursive: true, force: true }));
-    for (const file of ['.changeset/b.md', '.changeset/a.md', '.changeset/README.md', '.changeset/config.json', 'cli/.sampo/changesets/c.md']) {
-        mkdirSync(join(cwd, file, '..'), { recursive: true });
-        writeFileSync(join(cwd, file), '');
-    }
-    assert.deepEqual(listChangesets(['.changeset', 'cli/.sampo/changesets/', 'missing'], cwd), [
-        '.changeset/a.md',
-        '.changeset/b.md',
-        'cli/.sampo/changesets/c.md',
-    ]);
+test('retries GitHub server errors', async () => {
+    const routes = push([approval('bob')], [['c1', 1, 'alice', 'alice']]);
+    const compare = `/repos/${repo}/compare/${before}...${after}`;
+    const api = fakeApi(routes, { [compare]: 2 });
+    const result = await checkReleaseApproval({ api, repo, runId: 7, environment: 'NPM Release', before, after });
+    assert.deepEqual(result.prs, [1]);
+    await assert.rejects(
+        checkReleaseApproval({ api: fakeApi(routes, { [compare]: 3 }), repo, runId: 7, environment: 'NPM Release', before, after }),
+        /GitHub API 502/,
+    );
+});
+
+test('leaves runs that are not pushes to GitHub\'s own check', () => {
+    const script = fileURLToPath(new URL('./guard.mjs', import.meta.url));
+    const out = execFileSync('node', [script], {
+        env: { ...process.env, GITHUB_EVENT_NAME: 'workflow_dispatch' },
+        encoding: 'utf8',
+    });
+    assert.match(out, /Not a push \(workflow_dispatch\)/);
 });
