@@ -24,6 +24,12 @@ No general test suite. Run the changeset hygiene script tests with:
 node --test .github/scripts/check-changeset-coverage.test.mjs
 ```
 
+Run the release approval guard tests with:
+
+```bash
+node --test .github/actions/release-approval-guard/guard.test.mjs
+```
+
 The semgrep rule tests run with:
 
 ```bash
