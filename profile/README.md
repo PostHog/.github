@@ -1,1 +1,1 @@
-[![PostHog](https://res.cloudinary.com/dmukukwp6/image/upload/q_auto,f_auto/posthog_your_context_layer_54e51316fb.png)](https://posthog.com)
+[![PostHog: your product's context layer. PostHog automatically diagnoses problems, fixes bugs and generates pull requests, all without prompts.](https://github.com/user-attachments/assets/52390696-2a65-45ee-b34e-7b5d285ac58c)](https://posthog.com/?utm_source=github&utm_medium=org_profile)
