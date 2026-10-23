@@ -115,7 +115,7 @@ jobs:
         id: guard
         if: github.event_name == 'push'
         continue-on-error: true
-        uses: PostHog/.github/.github/actions/release-approval-guard@71adbfe4bf1dd9be4ab5debcb4a5b70789306d26 # pr-82
+        uses: PostHog/.github/.github/actions/release-approval-guard@f0431489d137b9e7474fc428cf176e4c668cc4a2 # main
         with:
           mode: report
           github-token: ${{ github.token }}
