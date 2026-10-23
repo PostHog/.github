@@ -1,22 +1,46 @@
 name: 'Release approval guard'
-description: 'Fail a release when an approver of its environment authored or merged a PR in the push that triggered it'
+description: 'Fail a release when an approver of its environment authored or queued a PR in the push that triggered it, or report who is excluded'
 
 inputs:
   environment:
-    description: 'Name of the environment whose approval gates the release, e.g. "NPM Release"'
-    required: true
+    description: 'Name of the environment whose approval gates the release, e.g. "NPM Release". Required in `enforce` mode.'
+    required: false
+    default: ''
+  mode:
+    description: '`enforce` fails the job when an approver authored or queued a PR in the push. `report` only lists the PRs and who is excluded, never fails, and needs no approval to exist yet.'
+    required: false
+    default: 'enforce'
   github-token:
-    description: 'Token with `actions: read`, `contents: read` and `pull-requests: read` on the repository'
+    description: 'Token with `contents: read` and `pull-requests: read` on the repository, plus `actions: read` in `enforce` mode'
     required: false
     default: ${{ github.token }}
+
+outputs:
+  blocked_logins:
+    description: 'Comma-separated logins excluded from approving: authors and enqueuers of the PRs in the push, bots omitted'
+    value: ${{ steps.guard.outputs.blocked_logins }}
+  blocked_mrkdwn:
+    description: 'Slack mrkdwn list of the excluded logins with the reason, e.g. `<https://github.com/alice|alice> (queued #5273)`'
+    value: ${{ steps.guard.outputs.blocked_mrkdwn }}
+  violations_mrkdwn:
+    description: 'Slack mrkdwn list of the approvers who violated the rule, same format as `blocked_mrkdwn`. Empty in `report` mode and when there are none.'
+    value: ${{ steps.guard.outputs.violations_mrkdwn }}
+  prs_mrkdwn:
+    description: 'Slack mrkdwn list of the PRs in the push, one `<url|#number> title` per line'
+    value: ${{ steps.guard.outputs.prs_mrkdwn }}
+  prs:
+    description: 'Comma-separated numbers of the PRs in the push'
+    value: ${{ steps.guard.outputs.prs }}
 
 runs:
   using: 'composite'
   steps:
     - name: Check release approvers against the PRs in the push
+      id: guard
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         ENVIRONMENT: ${{ inputs.environment }}
+        MODE: ${{ inputs.mode }}
         ACTION_PATH: ${{ github.action_path }}
       run: node "$ACTION_PATH/guard.mjs"

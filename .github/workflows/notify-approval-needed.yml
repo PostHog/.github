@@ -34,6 +34,8 @@ on:
         description: "Slack message timestamp for threading replies"
         value: ${{ jobs.notify.outputs.slack_ts }}
 
+# When the caller grants `contents: read` and `pull-requests: read` to this job, the message also names who
+# cannot approve (authors and enqueuers of the PRs in the push) and lists the PRs. Without them it still sends.
 jobs:
   notify:
     runs-on: ubuntu-latest
@@ -109,6 +111,94 @@ jobs:
           fi
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
 
+      - name: List who cannot approve
+        id: guard
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: PostHog/.github/.github/actions/release-approval-guard@71adbfe4bf1dd9be4ab5debcb4a5b70789306d26 # pr-82
+        with:
+          mode: report
+          github-token: ${{ github.token }}
+
+      - name: Build Slack payload
+        id: payload
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.slack_channel_id }}
+          USER_GROUP: ${{ inputs.slack_user_group_id }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          LATEST_TAG: ${{ steps.get-info.outputs.latest_tag }}
+          DEFAULT_BRANCH: ${{ steps.get-info.outputs.default_branch }}
+          BLOCKED_MRKDWN: ${{ steps.guard.outputs.blocked_mrkdwn }}
+          PRS_MRKDWN: ${{ steps.guard.outputs.prs_mrkdwn }}
+        run: |
+          set -euo pipefail
+
+          payload=$(jq -nc '
+            {
+              channel: $ENV.CHANNEL,
+              text: "🚀 Release Approval Needed for \($ENV.REPOSITORY)",
+              blocks: (
+                [
+                  {
+                    type: "header",
+                    text: {type: "plain_text", text: "🚀 Release Approval Needed - \($ENV.REPOSITORY)", emoji: true}
+                  },
+                  {
+                    type: "section",
+                    text: {type: "mrkdwn", text: "A new release is ready for approval in the `\($ENV.REPOSITORY)` repository."}
+                  },
+                  {
+                    type: "section",
+                    fields: (
+                      [{type: "mrkdwn", text: "*Repository:*\n<https://github.com/\($ENV.REPOSITORY)|\($ENV.REPOSITORY)>"}]
+                      + (if $ENV.PRS_MRKDWN != "" then [{type: "mrkdwn", verbatim: true, text: "*Includes:*\n\($ENV.PRS_MRKDWN)"}] else [] end)
+                    )
+                  }
+                ]
+                + (if $ENV.BLOCKED_MRKDWN != "" then [
+                  {
+                    type: "section",
+                    text: {type: "mrkdwn", text: "⛔ *Cannot approve this release:* \($ENV.BLOCKED_MRKDWN)"}
+                  },
+                  {
+                    type: "context",
+                    elements: [{type: "mrkdwn", text: "Authors of the PRs in this push, and whoever queued them, are excluded. The release fails if one of them approves."}]
+                  }
+                ] else [] end)
+                + [
+                  {
+                    type: "section",
+                    text: {type: "mrkdwn", text: "<!subteam^\($ENV.USER_GROUP)|@support-hero-client-libraries> Please review and approve the release."}
+                  },
+                  {
+                    type: "actions",
+                    elements: [
+                      {
+                        type: "button",
+                        text: {type: "plain_text", text: "View Diff on GitHub", emoji: true},
+                        url: "https://github.com/\($ENV.REPOSITORY)/compare/\($ENV.LATEST_TAG)...\($ENV.DEFAULT_BRANCH)"
+                      },
+                      {
+                        type: "button",
+                        text: {type: "plain_text", text: "Approve/Reject on GitHub", emoji: true},
+                        url: "https://github.com/\($ENV.REPOSITORY)/actions/runs/\($ENV.RUN_ID)",
+                        style: "primary"
+                      }
+                    ]
+                  }
+                ]
+              )
+            }')
+
+          delimiter="payload_$(openssl rand -hex 8)"
+          {
+            echo "payload<<$delimiter"
+            echo "$payload"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Send Slack notification
         id: notify
         uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
@@ -116,68 +206,7 @@ jobs:
         with:
           method: chat.postMessage
           token: ${{ secrets.slack_bot_token }}
-          payload: |
-            {
-                "channel": "${{ inputs.slack_channel_id }}",
-                "text": "🚀 Release Approval Needed for ${{ github.repository }}",
-                "blocks": [
-                {
-                    "type": "header",
-                    "text": {
-                    "type": "plain_text",
-                    "text": "🚀 Release Approval Needed - ${{ github.repository }}",
-                    "emoji": true
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                    "type": "mrkdwn",
-                    "text": "A new release is ready for approval in the `${{ github.repository }}` repository."
-                    }
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": "*Repository:*\n<https://github.com/${{ github.repository }}|${{ github.repository }}>"
-                    },
-                    ]
-                },
-                {
-                    "type": "section",
-                    "text": {
-                    "type": "mrkdwn",
-                    "text": "<!subteam^${{ inputs.slack_user_group_id }}|@support-hero-client-libraries> Please review and approve the release."
-                    }
-                },
-                {
-                    "type": "actions",
-                    "elements": [
-                    {
-                        "type": "button",
-                        "text": {
-                        "type": "plain_text",
-                        "text": "View Diff on GitHub",
-                        "emoji": true
-                        },
-                        "url": "https://github.com/${{ github.repository }}/compare/${{ steps.get-info.outputs.latest_tag }}...${{ steps.get-info.outputs.default_branch }}"
-                    },
-                    {
-                        "type": "button",
-                        "text": {
-                        "type": "plain_text",
-                        "text": "Approve/Reject on GitHub",
-                        "emoji": true
-                        },
-                        "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-                        "style": "primary"
-                    }
-                    ]
-                }
-                ]
-            }
+          payload: ${{ steps.payload.outputs.payload }}
 
       - name: Send Slack failure event to PostHog
         if: ${{ steps.notify.outcome == 'failure' }}
