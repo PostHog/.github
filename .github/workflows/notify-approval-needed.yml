@@ -24,11 +24,6 @@ on:
         required: false
         type: string
         default: "creatordate"
-      guard_ref:
-        description: "Ref of PostHog/.github to fetch the release approval guard from. Point at a branch while iterating; callers may pin a SHA."
-        required: false
-        type: string
-        default: "main"
     secrets:
       slack_bot_token:
         required: true
@@ -116,23 +111,11 @@ jobs:
           fi
           echo "default_branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout release approval guard
-        id: guard-source
-        if: github.event_name == 'push'
-        continue-on-error: true
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: PostHog/.github
-          ref: ${{ inputs.guard_ref }}
-          path: .github-shared
-          sparse-checkout: .github/actions/release-approval-guard
-          persist-credentials: false
-
       - name: List who cannot approve
         id: guard
-        if: github.event_name == 'push' && steps.guard-source.outcome == 'success'
+        if: github.event_name == 'push'
         continue-on-error: true
-        uses: ./.github-shared/.github/actions/release-approval-guard
+        uses: PostHog/.github/.github/actions/release-approval-guard@71adbfe4bf1dd9be4ab5debcb4a5b70789306d26 # pr-82
         with:
           mode: report
           github-token: ${{ github.token }}
@@ -170,7 +153,7 @@ jobs:
                     type: "section",
                     fields: (
                       [{type: "mrkdwn", text: "*Repository:*\n<https://github.com/\($ENV.REPOSITORY)|\($ENV.REPOSITORY)>"}]
-                      + (if $ENV.PRS_MRKDWN != "" then [{type: "mrkdwn", text: "*Includes:*\n\($ENV.PRS_MRKDWN)"}] else [] end)
+                      + (if $ENV.PRS_MRKDWN != "" then [{type: "mrkdwn", verbatim: true, text: "*Includes:*\n\($ENV.PRS_MRKDWN)"}] else [] end)
                     )
                   }
                 ]
