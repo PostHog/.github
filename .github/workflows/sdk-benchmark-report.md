@@ -37,7 +37,7 @@ The producing `pull_request` workflow remains read-only and can separately invok
 - The action verifies the workflow identity, source run and attempt, repository, PR association, head SHA, and merge-base against GitHub metadata before consuming results. Fork associations must be unambiguous.
 - Artifacts are bounded, validated data, never executable code. Report text is escaped; result metadata cannot choose the comment's target or URLs.
 - The action only updates its exact marker on the expected GitHub Actions bot's comment. It rechecks the current PR head and run attempt and rejects older reports before publication.
-- A repository/report-key concurrency group serializes publishers, including fork runs whose event does not identify a PR. Cancellation is disabled so a late older event cannot cancel a newer report. GitHub may replace pending jobs; the source-run guard still prevents stale writes.
+- A repository/report-key concurrency group serializes publishers, including fork runs whose event does not identify a PR. Cancellation is disabled so a late older event cannot cancel a newer report. `queue: max` preserves up to 100 pending publishers instead of replacing another PR's pending report. GitHub cancels additional arrivals when that queue is full; the source-run guard still prevents stale writes.
 - Egress auditing runs first. Audit mode observes traffic; it does not prevent exfiltration or replace least privilege.
 - Rendered Markdown and comparison JSON are retained for 14 days, including when publishing cannot complete. The source SDK workflow retains the raw measurement artifacts.
 
@@ -51,4 +51,4 @@ Unit tests for schema, comparisons, hostile artifacts, PR identity, forks, and s
 node --test .github/scripts/sdk-benchmark-workflow.test.mjs
 ```
 
-Also run Actionlint on both `sdk-benchmark-report.yml` and `sdk-benchmark-report-tests.yml`. Performance differences are informational, not merge gates; invalid inputs and operational errors remain visible. Linux runner calibration is separate from correctness of report generation.
+Also run Actionlint on both `sdk-benchmark-report.yml` and `sdk-benchmark-report-tests.yml`. GitHub [supports `queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idconcurrency), but Actionlint 1.7.12 does not yet recognize that key; ignore only its `unexpected key "queue" for "concurrency" section` diagnostic until support lands. The read-only test job also uses this setting so GitHub validates the syntax before publisher rollout. Performance differences are informational, not merge gates; invalid inputs and operational errors remain visible. Linux runner calibration is separate from correctness of report generation.

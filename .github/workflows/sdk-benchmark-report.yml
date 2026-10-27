@@ -37,6 +37,7 @@ jobs:
         concurrency:
             group: sdk-benchmark-report-${{ github.repository }}-${{ inputs.report-key }}
             cancel-in-progress: false
+            queue: max
         steps:
             - name: Audit runner egress
               uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
@@ -44,7 +45,7 @@ jobs:
                   egress-policy: audit
 
             - name: Verify source run and publish report
-              uses: PostHog/posthog-sdk-test-harness/.github/actions/benchmark-report@a558711336bd3b81be4a820ed10f26372fc568ed # SDK benchmark reporting (harness PR #93)
+              uses: PostHog/posthog-sdk-test-harness/.github/actions/benchmark-report@ef2507cce61b81327033aaa6ae5bcc8d96698121 # SDK benchmark reporting (harness PR #93)
               env:
                   GH_TOKEN: ${{ github.token }}
               with:

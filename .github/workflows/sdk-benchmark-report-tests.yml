@@ -17,6 +17,11 @@ jobs:
     test:
         runs-on: ubuntu-24.04
         timeout-minutes: 5
+        # Exercise the same concurrency syntax on a read-only job before publisher rollout.
+        concurrency:
+            group: sdk-benchmark-workflow-test-${{ github.run_id }}
+            cancel-in-progress: false
+            queue: max
         permissions:
             contents: read
         steps:

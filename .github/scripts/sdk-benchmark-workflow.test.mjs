@@ -22,6 +22,7 @@ test('publisher uses pinned trusted code and never checks out caller code', () =
 test('publishers serialize without cancellation and share a report-specific lock', () => {
     assert.match(workflow, /group: sdk-benchmark-report-\$\{\{ github\.repository \}\}-\$\{\{ inputs\.report-key \}\}/)
     assert.match(workflow, /cancel-in-progress: false/)
+    assert.match(workflow, /queue: max/)
 })
 
 test('permissions and token are explicit and scoped to the publisher', () => {
