@@ -12,6 +12,10 @@ For example, repositories can reference workflows from here using:
 uses: PostHog/.github/.github/workflows/reusable-workflow.yml@main
 ```
 
+### SDK performance reports
+
+[SDK benchmark reporting](.github/workflows/sdk-benchmark-report.md) consumes read-only PR benchmark artifacts in a separate trusted `workflow_run` job and updates an informational PR comment.
+
 ## 📄 Organization-wide community health files
 
 Files like `CODE_OF_CONDUCT.md`, `SECURITY.md`, and other community health files placed here become the default for all repositories in the organization that don't have their own versions.
