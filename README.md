@@ -14,7 +14,7 @@ uses: PostHog/.github/.github/workflows/reusable-workflow.yml@main
 
 ### SDK performance reports
 
-[SDK benchmark reporting](.github/workflows/sdk-benchmark-report.md) consumes read-only PR benchmark artifacts in a separate trusted `workflow_run` job and updates an informational PR comment.
+[SDK benchmark reporting](.github/workflows/sdk-benchmark-report.md) provides the result schema, reporting action, and reusable publishing workflow. SDK repositories run their benchmarks on PRs; a separate trusted `workflow_run` job consumes the result artifacts and updates an informational comment on the originating PR.
 
 ## 📄 Organization-wide community health files
 

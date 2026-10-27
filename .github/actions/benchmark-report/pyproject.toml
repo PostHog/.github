@@ -1,0 +1,30 @@
+[project]
+name = "posthog-sdk-benchmark-report"
+version = "0.1.0"
+requires-python = "==3.12.12"
+dependencies = ["jsonschema==4.26.0"]
+
+[dependency-groups]
+dev = [
+    "black==25.12.0",
+    "pytest==9.0.2",
+    "pyyaml==6.0.3",
+    "ruff==0.14.10",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

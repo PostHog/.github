@@ -8,7 +8,7 @@ This file captures only what *isn't* obvious from reading the files themselves �
 
 `PostHog/.github` is the org-level special repository: reusable workflows + composite actions referenced by every other repo in the org, org-wide community health file defaults, and the org profile (`profile/README.md`).
 
-There is no build step and no app. Changes are config (YAML workflows, semgrep rules) plus a couple of Node scripts, but the blast radius is the whole org — hence `.github/` and `workflows/` are CODEOWNED by `@PostHog/team-security` and most changes get their review.
+There is no app or repository-wide build step. Changes include config (YAML workflows, semgrep rules) and action-local Node/Python helpers, but the blast radius is the whole org — hence `.github/` and `workflows/` are CODEOWNED by `@PostHog/team-security` and most changes get their review.
 
 ## Gotchas
 
@@ -28,6 +28,15 @@ Run the release approval guard tests with:
 
 ```bash
 node --test .github/actions/release-approval-guard/guard.test.mjs
+```
+
+The SDK benchmark reporting action has its own locked Python environment; run its checks from the action directory:
+
+```bash
+cd .github/actions/benchmark-report
+uv run --frozen pytest
+uv run --frozen ruff check benchmarks tests
+uv run --frozen black --check benchmarks tests
 ```
 
 The semgrep rule tests run with:

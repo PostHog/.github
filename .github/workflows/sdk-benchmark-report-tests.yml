@@ -5,11 +5,13 @@ on:
         paths:
             - '.github/workflows/sdk-benchmark-report*.yml'
             - '.github/scripts/sdk-benchmark-workflow.test.mjs'
+            - '.github/actions/benchmark-report/**'
     push:
         branches: [main]
         paths:
             - '.github/workflows/sdk-benchmark-report*.yml'
             - '.github/scripts/sdk-benchmark-workflow.test.mjs'
+            - '.github/actions/benchmark-report/**'
 
 permissions: {}
 
@@ -33,3 +35,29 @@ jobs:
                   node-version: '24.13.0'
                   package-manager-cache: false
             - run: node --test .github/scripts/sdk-benchmark-workflow.test.mjs
+            - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+              with:
+                  version: '0.13.4'
+                  python-version: '3.12.12'
+                  enable-cache: false
+            - name: Test reporting action
+              working-directory: .github/actions/benchmark-report
+              run: |
+                  uv sync --frozen
+                  uv run --no-sync pytest
+                  uv run --no-sync ruff check benchmarks tests
+                  uv run --no-sync black --check benchmarks tests
+            - name: Render Node fixture through the action
+              uses: ./.github/actions/benchmark-report
+              with:
+                  base-results: .github/actions/benchmark-report/tests/fixtures/benchmarks/node-base.json
+                  head-results: .github/actions/benchmark-report/tests/fixtures/benchmarks/node-head.json
+                  source-status: success
+                  output-directory: ${{ runner.temp }}/node-benchmark-report-smoke
+            - name: Render Python fixture through the action
+              uses: ./.github/actions/benchmark-report
+              with:
+                  base-results: .github/actions/benchmark-report/tests/fixtures/benchmarks/python-base.json
+                  head-results: .github/actions/benchmark-report/tests/fixtures/benchmarks/python-head.json
+                  source-status: success
+                  output-directory: ${{ runner.temp }}/python-benchmark-report-smoke
