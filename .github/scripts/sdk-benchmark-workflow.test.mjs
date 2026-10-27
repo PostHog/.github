@@ -14,7 +14,7 @@ test('publisher uses pinned trusted code and never checks out caller code', () =
     const uses = [...workflow.matchAll(/\buses: (\S+)/g)].map((match) => match[1])
     assert.equal(uses.length, 3)
     for (const action of uses) assert.match(action, /^[\w./-]+@[0-9a-f]{40}$/)
-    assert.ok(uses.some((action) => action.startsWith('PostHog/posthog-sdk-test-harness/.github/actions/benchmark-report@')))
+    assert.ok(uses.some((action) => action.startsWith('PostHog/.github/.github/actions/benchmark-report@')))
     assert.ok(uses[0].startsWith('step-security/harden-runner@'))
     assert.doesNotMatch(workflow, /actions\/checkout|actions\/cache|secrets: inherit|script-ref|reporter-ref/)
 })
