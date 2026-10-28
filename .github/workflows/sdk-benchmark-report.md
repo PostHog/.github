@@ -2,6 +2,11 @@
 
 `sdk-benchmark-report.yml` publishes informational performance reports from an SDK repository's completed PR benchmark runs. The SDK owns execution and measurements. The reporting action in this repository owns the result schema, comparison, renderer, artifact verification, and comment updater; this workflow provides the trusted job boundary and permissions.
 
+The [SDK benchmark specification](sdk-benchmark-specification.md) defines the shared
+Node, Python and .NET workload inventory, controlled fixtures, measurement boundaries
+and producer conformance checks. It complements the result schema below; runtime-native
+counters and lifecycle differences remain explicit.
+
 ## Reporting action
 
 Use `PostHog/.github/.github/actions/benchmark-report@<full-commit-sha>` from an SDK workflow. Pin both the action and reusable workflow to reviewed, published commits of this repository.
