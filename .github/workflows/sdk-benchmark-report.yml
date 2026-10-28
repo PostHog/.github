@@ -8,7 +8,7 @@ on:
                 required: true
                 type: string
             artifact-name:
-                description: 'Exact producer artifact name containing base.json, head.json and revisions.json.'
+                description: 'Exact producer artifact name containing paired results or a shard bundle, plus revisions.json.'
                 required: true
                 type: string
             report-key:
@@ -16,7 +16,7 @@ on:
                 required: true
                 type: string
             sdk:
-                description: 'Expected SDK identifier in both result documents.'
+                description: 'Expected SDK identifier in every result document.'
                 required: true
                 type: string
 
@@ -45,7 +45,7 @@ jobs:
                   egress-policy: audit
 
             - name: Verify source run and publish report
-              uses: PostHog/.github/.github/actions/benchmark-report@a9b17fcb0e7d962e924d33053f2e40257d674629 # SDK benchmark reporting (PostHog/.github PR #84)
+              uses: PostHog/.github/.github/actions/benchmark-report@9b34fde6b26df7d874b85d2de09904b4ab701234 # SDK benchmark reporting (PostHog/.github PR #84)
               env:
                   GH_TOKEN: ${{ github.token }}
               with:
