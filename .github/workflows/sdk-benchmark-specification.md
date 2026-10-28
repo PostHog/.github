@@ -14,7 +14,7 @@ not changed to implement this contract.
 Each run uses the same head-side benchmark sources and fixtures for both SDK revisions,
 separately built or installed through their supported public entry points. Full runs
 use six paired repetitions, alternating which revision goes first. Revisions never
-run concurrently. Each workload/pass/repetition runs in a fresh process. Timing,
+run concurrently on the same runner. Each workload/pass/repetition runs in a fresh process. Timing,
 allocation instrumentation and memory observation use separate passes.
 
 Producers implementing this contract set `suite.specification` to `sdk-benchmarks/v1`
@@ -194,10 +194,34 @@ Retained heap, RSS and allocation volume must not be described as interchangeabl
 ## Failures, CI and acceptance
 
 Existing read-only every-PR execution and separately trusted publication remain in
-place. Jobs retain the 30-minute cap. Workers have a 120-second deadline; after two
-worker timeouts, finish the current pair, save partial diagnostics and fail. Metadata
-commands that execute SDK lifecycle code also need bounded execution. Runtime-native
-memory ceilings must be named accurately: a managed-heap limit is not an RSS limit.
+place. Keep benchmark latency close to existing required-check completion, allowing
+a modest additional wait rather than adding ten-plus minutes. Hosted measurements,
+not concurrent local smoke runs, establish latency. Repository-specific safety
+deadlines are 15 minutes per Node shard, 10 minutes per Python shard, 12 minutes
+for serial .NET, and 5 minutes for shard aggregation. Measurement steps have shorter
+deadlines to reserve artifact upload/reporting time: 12 minutes for Node, 8 minutes
+for Python, and 10 minutes for .NET's build/measurement step. These are timeout
+limits, not throughput targets; reassess workload assignment using measured hosted
+evidence.
+
+Node and Python use four independent runners for fixed workload groups:
+`flags-single` (nine single-flag cases), `flags-scaling` (three all-flags sizes),
+`flags-memory` (load and refresh), and `capture` (six enqueue/delivery cases).
+The versioned head-side `shards.json` is an exact nonduplicated partition of full
+and smoke inventories and participates in benchmark source identity. Each shard
+keeps all six paired repetitions per workload, alternating revisions and using
+fresh processes without same-host measurement concurrency. Shard IDs are recorded
+in execution metadata, with a unique pair ID per shard. Suite metadata remains
+identical across shards. .NET remains serial; unsharded execution stays supported.
+Collection verifies coverage and preserves per-shard environments as defined in
+the reporting contract. It does not merge measurements from different runners
+into one environment or an aggregate ratio.
+
+Workers have a 120-second deadline. Each coordinator, whether sharded or serial,
+stops after two worker timeouts: finish the current pair, save partial diagnostics
+and fail. Metadata commands that execute SDK lifecycle code also need bounded
+execution. Runtime-native memory ceilings must be named accurately: a managed-heap
+limit is not an RSS limit.
 
 Controls must verify the full/smoke inventory and parameters, both explicit flush
 schedules, fixture/sequence validation (including balanced duplicates), public lifecycle

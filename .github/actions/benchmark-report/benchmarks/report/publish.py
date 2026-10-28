@@ -3,6 +3,7 @@
 import re
 from datetime import datetime
 
+from .bundle import compare_bundle, validate_bundle, validate_revisions
 from .compare import compare
 from .github import MAX_ARCHIVE_BYTES, GitHub, read_archive
 from .render import render
@@ -136,25 +137,31 @@ class Publisher:
         )
         files = read_archive(self.api.download(f"{self.root}/actions/artifacts/{positive_id(artifact['id'])}/zip"))
         revisions = bounded_json(files["revisions.json"], limit=8192)
-        require(
-            isinstance(revisions, dict) and set(revisions) == {"target", "head", "base"}, "Invalid revisions document"
-        )
-        for value in revisions.values():
-            sha(value)
+        validate_revisions(revisions)
         if revisions["target"] != target:
             raise SkipPublication("Artifact target revision cannot be verified against trusted PR metadata")
         require(revisions["head"] == run["head_sha"], "Artifact head revision differs")
         merge = self.api.api(f"{self.root}/compare/{target}...{sha(run['head_sha'])}")
         baseline = sha(merge["merge_base_commit"]["sha"])
         require(revisions["base"] == baseline, "Artifact baseline is not the expected merge base")
-        base, head = (validate(bounded_json(files[f"{role}.json"])) for role in ("base", "head"))
-        for role, doc, commit in (("base", base, baseline), ("head", head, run["head_sha"])):
-            require(doc["sdk"] == self.sdk, "Artifact SDK differs")
-            require(doc["revision"]["role"] == role and doc["revision"]["commit"] == commit, "Result revision differs")
-            require(not doc["revision"].get("dirty", False), "Dirty SDK result cannot be published")
-            require(doc["suite"]["source_commit"] == run["head_sha"], "Benchmark source revision differs")
+        bundle = validate_bundle(bounded_json(files["bundle.json"])) if "bundle.json" in files else None
+        pairs = (
+            [(shard["base"], shard["head"]) for shard in bundle["shards"]]
+            if bundle is not None
+            else [tuple(validate(bounded_json(files[f"{role}.json"])) for role in ("base", "head"))]
+        )
+        for base, head in pairs:
+            for role, doc, commit in (("base", base, baseline), ("head", head, run["head_sha"])):
+                require(doc["sdk"] == self.sdk, "Artifact SDK differs")
+                require(
+                    doc["revision"]["role"] == role and doc["revision"]["commit"] == commit, "Result revision differs"
+                )
+                require(not doc["revision"].get("dirty", False), "Dirty SDK result cannot be published")
+                require(doc["suite"]["source_commit"] == run["head_sha"], "Benchmark source revision differs")
         require(isinstance(run.get("conclusion"), str), "Missing source run conclusion")
-        return compare(base, head, source_status=run["conclusion"])
+        if bundle is not None:
+            return compare_bundle(bundle, source_status=run["conclusion"])
+        return compare(*pairs[0], source_status=run["conclusion"])
 
     def upsert(self, event: dict, run: dict, pr: dict, target: str, fallback: bool) -> str:
         comments = self.api.pages(f"{self.root}/issues/{positive_id(pr['number'])}/comments")

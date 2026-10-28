@@ -2,10 +2,10 @@ name: SDK benchmark report
 description: Validate and render paired SDK results, or publish from a verified workflow_run
 inputs:
   mode:
-    description: render (offline) or publish (trusted workflow_run only)
+    description: render or collect (offline), or publish (trusted workflow_run only)
     default: render
   source-status:
-    description: Measurement step outcome for render mode; publish mode uses the verified source run conclusion
+    description: Measurement or matrix outcome for render/collect mode; publish mode uses the verified source run conclusion
     default: ''
   base-results:
     description: Baseline result JSON path for render mode
@@ -13,8 +13,17 @@ inputs:
   head-results:
     description: Head result JSON path for render mode
     default: ''
+  bundle-results:
+    description: Saved bundle JSON path for render mode (instead of base/head)
+    default: ''
+  shard-manifest:
+    description: Producer JSON manifest path for collect mode
+    default: ''
+  shard-directory:
+    description: Directory containing benchmark-shard-ID downloads for collect mode
+    default: ''
   output-directory:
-    description: Directory for report.md and comparison.json
+    description: Directory for report.md and comparison.json; collect also writes bundle.json and revisions.json
     default: benchmark-report
   workflow-path:
     description: Trusted literal producer workflow path for publish mode
@@ -51,6 +60,9 @@ runs:
         REPORT_SOURCE_STATUS: ${{ inputs.source-status }}
         REPORT_BASE: ${{ inputs.base-results }}
         REPORT_HEAD: ${{ inputs.head-results }}
+        REPORT_BUNDLE: ${{ inputs.bundle-results }}
+        REPORT_MANIFEST: ${{ inputs.shard-manifest }}
+        REPORT_SHARDS: ${{ inputs.shard-directory }}
         REPORT_OUTPUT: ${{ inputs.output-directory }}
         REPORT_WORKFLOW: ${{ inputs.workflow-path }}
         REPORT_ARTIFACT: ${{ inputs.artifact-name }}
@@ -64,5 +76,7 @@ runs:
           python -I "$root/benchmarks/report/cli.py" \
           --mode "$REPORT_MODE" --source-status "$REPORT_SOURCE_STATUS" \
           --base-results "$REPORT_BASE" --head-results "$REPORT_HEAD" \
+          --bundle-results "$REPORT_BUNDLE" --shard-manifest "$REPORT_MANIFEST" \
+          --shard-directory "$REPORT_SHARDS" \
           --output-directory "$REPORT_OUTPUT" --workflow-path "$REPORT_WORKFLOW" \
           --artifact-name "$REPORT_ARTIFACT" --report-key "$REPORT_KEY" --sdk "$REPORT_SDK"

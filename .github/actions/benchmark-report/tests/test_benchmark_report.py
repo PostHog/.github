@@ -427,6 +427,14 @@ def test_action_pins_toolchain_and_passes_inputs_as_data():
     assert "${{" not in report["run"]
     assert "--frozen --no-dev --no-install-project" in report["run"]
     assert action["inputs"]["mode"]["default"] == "render"
+    for name, variable in (
+        ("bundle-results", "REPORT_BUNDLE"),
+        ("shard-manifest", "REPORT_MANIFEST"),
+        ("shard-directory", "REPORT_SHARDS"),
+    ):
+        assert action["inputs"][name]["default"] == ""
+        assert report["env"][variable] == "${{ inputs." + name + " }}"
+        assert f'--{name} "${variable}"' in report["run"]
     assert "token" not in action["inputs"]
 
 

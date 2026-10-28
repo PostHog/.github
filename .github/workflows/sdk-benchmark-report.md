@@ -13,10 +13,12 @@ Use `PostHog/.github/.github/actions/benchmark-report@<full-commit-sha>` from an
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `mode` | `render` | Offline `render`, or trusted `workflow_run` `publish` |
-| `base-results`, `head-results` | empty | Required result paths for rendering |
-| `source-status` | empty | Measurement step outcome for rendering; publication uses the verified run conclusion |
-| `output-directory` | `benchmark-report` | Destination for `report.md` and `comparison.json` |
+| `mode` | `render` | Offline `render` or `collect`, or trusted `workflow_run` `publish` |
+| `base-results`, `head-results` | empty | Paired result paths for legacy rendering |
+| `bundle-results` | empty | Saved bundle path for rendering, instead of base/head paths |
+| `shard-manifest`, `shard-directory` | empty | Required manifest and download directory paths for collection |
+| `source-status` | empty | Measurement step or matrix outcome for rendering/collection; publication uses the verified run conclusion |
+| `output-directory` | `benchmark-report` | Destination for `report.md` and `comparison.json`; collection also writes `bundle.json` and `revisions.json` |
 | `workflow-path`, `artifact-name`, `report-key`, `sdk` | empty | Trusted publishing constants, as shown below |
 
 Outputs `report-path` and `comparison-path` contain absolute paths. Rendering needs no token and makes no API calls. Publishing receives `GH_TOKEN` through the environment. The action uses locked Python 3.12.12 / uv 0.13.4 dependencies with caching disabled.
@@ -90,9 +92,82 @@ is capped at 12 rows, preferring representative single-flag timing, all-flags
 scaling timing/allocation bytes, load/refresh memory, and capture/drain cases.
 Selection uses shared workload parameters and metric semantics, not runtime
 profiler logic. Unsupported measurements remain in the collapsible details
-rather than crowding out numerical headline rows. Markdown is bounded below 60,000 bytes;
+rather than crowding out numerical headline rows. Markdown is bounded below 58,000 bytes;
 `comparison.json` retains omitted rows. Artifact text is escaped, URLs/mentions
 are neutralized, and raw stderr is not included in reports.
+
+## Sharded collection and bundle v1
+
+Node and Python use four independent jobs: `flags-single`, `flags-scaling`,
+`flags-memory`, and `capture`. Each workload's complete paired repetitions stay on
+one runner. Each producer's head-side `shards.json` declares `manifest_version: 1`,
+`sdk`, and a `shards` array of `{id, workloads}` entries. Native controls require
+an exact partition of both full and smoke inventories; the shared collector
+requires exact coverage of that manifest on both sides. The manifest is data,
+not proof that arbitrary PR code executed honestly.
+
+Upload `base.json`, `head.json`, and `revisions.json` from each job under the unique
+artifact name `benchmark-shard-<id>`. Download with `merge-multiple: false` so the
+input root contains exactly those artifact directories. Collect without executing
+producer scripts:
+
+```sh
+uv run --no-sync python -I benchmarks/report/cli.py \
+  --mode collect --shard-manifest /path/to/shards.json \
+  --shard-directory /path/to/downloads --source-status success \
+  --output-directory /path/to/report
+```
+
+In CI, pass the matrix's `needs.benchmark.result` as `source-status`, not a literal
+success value. Aggregate after all noncancelled matrix outcomes, including failure.
+A failed source suppresses numeric comparisons across every shard and returns a
+nonzero exit, while preserving valid raw data. Missing or malformed shards fail
+collection rather than producing a reduced-coverage bundle. Retain the individual
+raw shard artifacts for diagnostics.
+
+The canonical raw artifact contains **only** `bundle.json` and `revisions.json`.
+Upload `report.md` and `comparison.json` separately. Bundle shape:
+
+```json
+{
+  "bundle_version": 1,
+  "manifest": {
+    "manifest_version": 1,
+    "sdk": "posthog-node",
+    "shards": [{"id": "flags-scaling", "workloads": ["flags.all.10"]}]
+  },
+  "shards": [{"id": "flags-scaling", "base": {}, "head": {}}]
+}
+```
+
+The empty result objects above stand for complete schema-v1 documents. Collection
+and saved-bundle validation live in `benchmarks/report/bundle.py`:
+
+- At most 16 shards; IDs match `[a-z0-9][a-z0-9-]{0,63}`. Workload lists are
+  nonempty, unique and disjoint, with at most 128 workloads per shard.
+- Envelope, manifest and shard-entry fields are exact. Undeclared, duplicate,
+  missing, extra, symlink and nonregular inputs are rejected.
+- Every document has the expected SDK, role, `execution.shard_id` and workload
+  coverage. Each shard's pair ID matches within its pair and is unique across
+  shards. All documents share the same suite/source/profile/configuration and
+  consistent per-role revision identity. Sidecar revisions are identical exact
+  `target`, `base`, `head` SHA objects; collection checks result commits and
+  head-side benchmark source against them.
+- Inputs are size-checked before retaining the collection: aggregate manifest and
+  shard files are capped at 8 MiB. The serialized bundle independently satisfies
+  the 8-MiB JSON bound and existing structure/text limits. ZIPs remain capped at
+  20 MiB compressed and uncompressed, with existing member and compression limits.
+- Each pair is compared independently using the legacy compatibility rules.
+  CPUs/runtimes may differ across shards, but a mismatch within a pair suppresses
+  that pair's comparisons. Build provenance and environments remain per shard;
+  no cross-shard ratios are averaged.
+
+Bundle comparisons use `comparison_version: 2`, with `shards` containing per-shard
+contexts, compatibility and failure state; `workload_shards` and row `shard_id`
+identify workload placement. Reports explicitly label each shard's environments.
+Raw bundles retain all samples, runs and checkpoints. Legacy comparisons remain
+version 1. To render a saved bundle offline, use `--bundle-results /path/to/bundle.json`
+instead of `--base-results`/`--head-results`; these inputs cannot be combined.
 
 ## Caller
 
@@ -119,7 +194,7 @@ jobs:
       sdk: posthog-node
 ```
 
-Use repository-owned constants for all four inputs. `report-key` is a stable, SDK-specific comment namespace, not a PR number. `sdk` must match both result documents. The producer artifact contains `base.json`, `head.json`, and `revisions.json` (`target`, `base`, and `head` full commit SHAs).
+Use repository-owned constants for all four inputs. `report-key` is a stable, SDK-specific comment namespace, not a PR number. `sdk` must match every result document. The producer artifact contains either the legacy `base.json`, `head.json`, and `revisions.json`, or the sharded `bundle.json` and `revisions.json`. Mixed or extra members are rejected. Revisions contain `target`, `base`, and `head` full commit SHAs. Publication verifies every shard's clean SDK revision and head-side benchmark source against the trusted run, PR and merge-base.
 
 The producing `pull_request` workflow remains read-only and can separately invoke `PostHog/.github/.github/actions/benchmark-report@<full-commit-sha>` in render-only mode for a job summary, passing `steps.measure.outcome` as `source-status`. It must not receive the publisher's writable token or service credentials. No manually supplied PR number or artifact-controlled command is accepted by the publisher.
 

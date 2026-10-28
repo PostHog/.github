@@ -9,20 +9,24 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from benchmarks.report.bundle import collect, compare_bundle, encode_bundle, load_bundle
 from benchmarks.report.compare import SOURCE_STATUSES, compare
 from benchmarks.report.github import GitHub
 from benchmarks.report.publish import Publisher
-from benchmarks.report.render import render, write_outputs
+from benchmarks.report.render import json_text, render, write_outputs
 from benchmarks.report.validate import MAX_DOCUMENT_BYTES, InvalidResult, bounded_json, load_result, require
 
 
 def main(argv=None, environ=None) -> int:
     env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("render", "publish"), default="render")
+    parser.add_argument("--mode", choices=("render", "collect", "publish"), default="render")
     parser.add_argument("--source-status", choices=sorted(SOURCE_STATUSES | {""}), default="")
     parser.add_argument("--base-results", default="")
     parser.add_argument("--head-results", default="")
+    parser.add_argument("--bundle-results", default="")
+    parser.add_argument("--shard-manifest", default="")
+    parser.add_argument("--shard-directory", default="")
     parser.add_argument("--output-directory", default="benchmark-report")
     parser.add_argument("--workflow-path", default="")
     parser.add_argument("--artifact-name", default="")
@@ -30,13 +34,40 @@ def main(argv=None, environ=None) -> int:
     parser.add_argument("--sdk", default="")
     args = parser.parse_args(argv)
     try:
-        if args.mode == "render":
-            require(args.base_results and args.head_results, "Both result paths are required")
-            comparison = compare(
-                load_result(args.base_results), load_result(args.head_results), source_status=args.source_status or None
-            )
+        if args.mode == "collect":
+            require(not (args.base_results or args.head_results or args.bundle_results), "Ambiguous collection inputs")
+            require(args.shard_manifest and args.shard_directory, "Manifest and shard directory are required")
+            bundle, revisions = collect(args.shard_manifest, args.shard_directory)
+            comparison = compare_bundle(bundle, source_status=args.source_status or None)
+            report = render(comparison)
+            directory = Path(args.output_directory)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "bundle.json").write_bytes(encode_bundle(bundle))
+            (directory / "revisions.json").write_text(json_text(revisions), encoding="utf-8")
+        elif args.mode == "render":
+            require(not (args.shard_manifest or args.shard_directory), "Shard inputs require collect mode")
+            if args.bundle_results:
+                require(not (args.base_results or args.head_results), "Ambiguous rendering inputs")
+                comparison = compare_bundle(load_bundle(args.bundle_results), source_status=args.source_status or None)
+            else:
+                require(args.base_results and args.head_results, "Both result paths are required")
+                comparison = compare(
+                    load_result(args.base_results),
+                    load_result(args.head_results),
+                    source_status=args.source_status or None,
+                )
             report = render(comparison)
         else:
+            require(
+                not (
+                    args.base_results
+                    or args.head_results
+                    or args.bundle_results
+                    or args.shard_manifest
+                    or args.shard_directory
+                ),
+                "Publish accepts only verified artifact inputs",
+            )
             require(env.get("GITHUB_EVENT_NAME") == "workflow_run", "Publish requires a workflow_run event")
             require(bool(env.get("GITHUB_EVENT_PATH")), "Missing GitHub event file")
             with Path(env["GITHUB_EVENT_PATH"]).open("rb") as stream:

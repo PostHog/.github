@@ -111,9 +111,10 @@ def read_archive(data: bytes) -> dict[str, bytes]:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             entries = archive.infolist()
-            require(len(entries) == 3, "Artifact must contain exactly three result files")
+            names = {entry.filename for entry in entries}
             require(
-                {entry.filename for entry in entries} == {"base.json", "head.json", "revisions.json"},
+                len(entries) == len(names)
+                and names in ({"base.json", "head.json", "revisions.json"}, {"bundle.json", "revisions.json"}),
                 "Unexpected or duplicate artifact filename",
             )
             require(

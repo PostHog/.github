@@ -69,8 +69,11 @@ def _row(row: dict, details=False, workload=None) -> str:
             if len(failures) > 3:
                 status += f"; {len(failures) - 3} more {role} failures in comparison.json"
         status += "; method: " + safe_text(metric.get("method", "unavailable"), 160)
+    workload_label = safe_text(row["workload"], 100)
+    if "shard_id" in row:
+        workload_label += " · shard: " + safe_text(row["shard_id"], 100)
     return (
-        f"| {safe_text(row['workload'], 100)} | {label} | {_number(row.get('base_median'))} | "
+        f"| {workload_label} | {label} | {_number(row.get('base_median'))} | "
         f"{_number(row.get('head_median'))} | {change} · {status} |\n"
     )
 
@@ -142,6 +145,29 @@ def headline_rows(comparison: dict) -> list[dict]:
     return selected[:12]
 
 
+def _environment(contexts: dict, *, sharded=False) -> list[str]:
+    chunks = []
+    text_limit, resource_limit = (96, 240) if sharded else (240, 1000)
+    for role in ("base", "head"):
+        context = contexts[role]
+        execution = context["execution"]
+        chunks.append(f"**{role.title()}**: {safe_text(context['revision']['commit'])}")
+        if context["revision"].get("dirty"):
+            chunks.append(" (dirty working tree)")
+        chunks.append(
+            f" · {safe_text(execution['runtime'], text_limit)} {safe_text(execution['runtime_version'], text_limit)}"
+            f" · {safe_text(execution['os'], text_limit)}/{safe_text(execution['arch'], text_limit)}"
+            f" · CPU: {safe_text(execution['cpu'], text_limit)}"
+            f" · runner: {safe_text(execution['runner_class'], text_limit)}\n\n"
+        )
+        chunks.append(
+            "Resource limits: "
+            + safe_text(json.dumps(execution["resource_limits"], sort_keys=True), resource_limit)
+            + "\n\n"
+        )
+    return chunks
+
+
 def render(comparison: dict) -> str:
     chunks = [
         f"## SDK performance: {safe_text(comparison['sdk'])}\n\n",
@@ -150,20 +176,13 @@ def render(comparison: dict) -> str:
     ]
     if comparison["execution_failed"]:
         chunks.append("**Benchmark execution failed. Partial samples are not evidence of improvement.**\n\n")
-    for role in ("base", "head"):
-        context = comparison["context"][role]
-        execution = context["execution"]
-        chunks.append(f"**{role.title()}**: {safe_text(context['revision']['commit'])}")
-        if context["revision"].get("dirty"):
-            chunks.append(" (dirty working tree)")
-        chunks.append(
-            f" · {safe_text(execution['runtime'])} {safe_text(execution['runtime_version'])}"
-            f" · {safe_text(execution['os'])}/{safe_text(execution['arch'])}"
-            f" · CPU: {safe_text(execution['cpu'])} · runner: {safe_text(execution['runner_class'])}\n\n"
-        )
-        chunks.append(
-            "Resource limits: " + safe_text(json.dumps(execution["resource_limits"], sort_keys=True), 1000) + "\n\n"
-        )
+    if comparison["comparison_version"] == 2:
+        chunks.append("Each shard is paired on its own runner; environments below apply only to that shard.\n\n")
+        for identity, shard in comparison["shards"].items():
+            chunks.append(f"### Shard: {safe_text(identity)}\n\n")
+            chunks.extend(_environment(shard["context"], sharded=True))
+    else:
+        chunks.extend(_environment(comparison["context"]))
     chunks.append("Full comparison, configuration, samples and checkpoints: `comparison.json` (job artifact).\n\n")
     table = "| Workload | Metric · unit | Base | PR | Change · interpretation |\n| --- | --- | --- | --- | --- |\n"
     chunks.append(table)
