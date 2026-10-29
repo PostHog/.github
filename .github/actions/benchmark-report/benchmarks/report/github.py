@@ -81,8 +81,9 @@ class GitHub:
 
     def pages(self, path: str, key: str | None = None) -> list:
         result = []
+        separator = "&" if "?" in path else "?"
         for page in range(1, 11):
-            response = self.api(f"{path}?per_page=100&page={page}")
+            response = self.api(f"{path}{separator}per_page=100&page={page}")
             items = response[key] if key else response
             require(isinstance(items, list) and len(items) <= 100, "Invalid paginated API response")
             result.extend(items)

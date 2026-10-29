@@ -3,6 +3,7 @@
 import copy
 import html
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -26,6 +27,7 @@ class FakeGitHub:
             "run_number": 20,
             "run_attempt": 1,
             "head_sha": HEAD,
+            "head_branch": "feature",
             "repository": REPO,
             "head_repository": REPO,
             "event": "pull_request",
@@ -96,6 +98,11 @@ class FakeGitHub:
             assert key == "artifacts"
             return copy.deepcopy(self.artifacts)
         if path == ROOT + f"/commits/{HEAD}/pulls":
+            # The commit endpoint does not associate fork heads with their base-repository PR.
+            return [] if self.run["head_repository"] == FORK else copy.deepcopy(self.candidates)
+        if path.startswith(ROOT + "/pulls?"):
+            owner = self.run["head_repository"]["full_name"].split("/", 1)[0]
+            assert parse_qs(urlsplit(path).query) == {"state": ["open"], "head": [f"{owner}:{self.run['head_branch']}"]}
             return copy.deepcopy(self.candidates)
         if path == ROOT + "/issues/7/comments":
             return copy.deepcopy(self.comments)
@@ -159,14 +166,18 @@ def test_only_exact_marker_expected_bot_comments_are_updated(change):
     assert api.writes[0][1] == "POST"
 
 
-def test_fork_empty_associations_uses_exact_commit_and_repo():
+@pytest.mark.parametrize("branch", ["feature", "fix/issue#1&label=value+percent%", "fix/世界"])
+def test_fork_empty_associations_uses_owner_branch_then_verifies_commit_and_repo(branch):
     api = FakeGitHub()
-    api.run.update(pull_requests=[], head_repository=FORK)
+    api.run.update(pull_requests=[], head_repository=FORK, head_branch=branch)
     api.pr["head"]["repo"] = FORK
     api.artifacts[0]["workflow_run"]["head_repository_id"] = 2
+    assert api.pages(ROOT + f"/commits/{HEAD}/pulls") == []
     result, _ = publisher(api).publish(api.event)
     assert result["publication"]["status"] == "created"
-    assert (ROOT + f"/commits/{HEAD}/pulls", "GET") in api.calls
+    lookups = [path for path, method in api.calls if path.startswith(ROOT + "/pulls?")]
+    assert len(lookups) == 1
+    assert parse_qs(urlsplit(lookups[0]).query) == {"state": ["open"], "head": [f"contributor:{branch}"]}
 
 
 @pytest.mark.parametrize(
@@ -189,6 +200,43 @@ def test_no_verified_current_pr_explicitly_skips(mutation):
     assert "Publication skipped" in report
     assert not api.writes
     assert not any(method == "DOWNLOAD" for _, method in api.calls)
+
+
+def test_same_repository_empty_associations_uses_owner_branch_query():
+    api = FakeGitHub()
+    api.run["pull_requests"] = []
+    assert publisher(api).publish(api.event)[0]["publication"]["status"] == "created"
+    assert (ROOT + "/pulls?state=open&head=PostHog%3Afeature", "GET") in api.calls
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda a: a.pr.update(state="closed"),
+        lambda a: a.pr["head"].update(sha="d" * 40),
+        lambda a: a.pr["head"].update(repo=None),
+        lambda a: a.pr["head"].update(repo=dict(FORK, id=99)),
+        lambda a: a.pr["head"].update(repo=dict(FORK, full_name="contributor/other-sdk")),
+        lambda a: a.pr["base"].update(repo=FORK),
+    ],
+)
+def test_fork_query_candidates_still_require_exact_current_identity(mutation):
+    api = FakeGitHub()
+    api.run.update(pull_requests=[], head_repository=FORK)
+    api.pr["head"]["repo"] = FORK
+    mutation(api)
+    assert publisher(api).publish(api.event)[0]["publication"]["status"] == "skipped"
+    assert not api.writes
+    assert not any(method == "DOWNLOAD" for _, method in api.calls)
+
+
+@pytest.mark.parametrize("branch", [None, "", 123, []])
+def test_fallback_requires_source_branch_metadata(branch):
+    api = FakeGitHub()
+    api.run.update(pull_requests=[], head_branch=branch)
+    with pytest.raises(InvalidResult, match="Missing source head branch"):
+        publisher(api).publish(api.event)
+    assert not api.writes
 
 
 def test_ambiguous_fork_association_skips():

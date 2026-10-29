@@ -217,7 +217,7 @@ The producing `pull_request` workflow remains read-only and can separately invok
 ## Trust and ordering
 
 - Only completed `workflow_run` events can invoke the publishing job. No caller checkout occurs; reporting code is pinned to a commit of this repository in the workflow.
-- The action verifies the workflow identity, source run and attempt, repository, PR association, head SHA, and merge-base against GitHub metadata before consuming results. Fork associations must be unambiguous.
+- The action verifies the workflow identity, source run and attempt, repository, PR association, head SHA, and merge-base against GitHub metadata before consuming results. When a source run has no PR associations (common for forks), it queries open PRs by the source repository owner and URL-encoded head branch. Candidates still require the exact current head SHA, head repository and base repository; exactly one may match.
 - Artifacts are bounded, validated data, never executable code. Report text is escaped; result metadata cannot choose the comment's target or URLs.
 - The action only updates its exact marker on the expected GitHub Actions bot's comment. It rechecks the current PR head and run attempt and rejects older reports before publication.
 - A repository/report-key concurrency group serializes publishers, including fork runs whose event does not identify a PR. Cancellation is disabled so a late older event cannot cancel a newer report. `queue: max` preserves up to 100 pending publishers instead of replacing another PR's pending report. GitHub cancels additional arrivals when that queue is full; the source-run guard still prevents stale writes.

@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from urllib.parse import urlencode
 
 from .bundle import compare_bundle, validate_bundle, validate_revisions
 from .compare import compare
@@ -96,7 +97,16 @@ class Publisher:
         associations = run["pull_requests"]
         require(isinstance(associations, list) and len(associations) <= 100, "Invalid PR associations")
         fallback = not associations
-        candidates = associations or self.api.pages(f"{self.root}/commits/{sha(run['head_sha'])}/pulls")
+        if fallback:
+            repository = run["head_repository"]["full_name"]
+            branch = run["head_branch"]
+            require(isinstance(repository, str) and REPOSITORY.fullmatch(repository), "Invalid head repository")
+            require(isinstance(branch, str) and branch, "Missing source head branch")
+            owner = repository.split("/", 1)[0]
+            query = urlencode({"state": "open", "head": f"{owner}:{branch}"})
+            candidates = self.api.pages(f"{self.root}/pulls?{query}")
+        else:
+            candidates = associations
         matches = []
         seen = set()
         for candidate in candidates:

@@ -4,6 +4,7 @@ import io
 import json
 import stat
 import urllib.error
+import urllib.parse
 import zipfile
 from http.client import BadStatusLine, IncompleteRead
 
@@ -204,12 +205,30 @@ def test_protocol_errors_write_safe_cli_failure_artifacts(stage, tmp_path, monke
     assert "Reporting failed" in summary.read_text()
 
 
-def test_request_and_pagination_budgets():
+def test_pagination_preserves_encoded_head_filter_across_pages():
+    query = urllib.parse.urlencode({"state": "open", "head": "contributor:fix/issue#1&label=value+percent%"})
+    first = [{"number": i} for i in range(100)]
+    last = [{"number": 100}]
+    api = client([Response(body=json.dumps(first).encode()), Response(body=json.dumps(last).encode())])
+    assert api.pages(f"/repos/PostHog/sdk/pulls?{query}") == first + last
+    for page, (request, _) in enumerate(api.opener.calls, 1):
+        parsed = urllib.parse.urlsplit(request.full_url)
+        assert parsed.path == "/repos/PostHog/sdk/pulls"
+        assert urllib.parse.parse_qs(parsed.query) == {
+            "state": ["open"],
+            "head": ["contributor:fix/issue#1&label=value+percent%"],
+            "per_page": ["100"],
+            "page": [str(page)],
+        }
+
+
+@pytest.mark.parametrize("query", ["", "?state=open&head=contributor%3Afeature"])
+def test_request_and_pagination_budgets(query):
     api = client([])
     api.requests = 100
     with pytest.raises(InvalidResult, match="budget"):
         api.api("/repos/PostHog/sdk")
     api = client([Response(body=b"[" + b",".join([b"{}"] * 100) + b"]") for _ in range(10)])
     with pytest.raises(InvalidResult, match="pagination"):
-        api.pages("/repos/PostHog/sdk/pulls")
+        api.pages("/repos/PostHog/sdk/pulls" + query)
     assert len(api.opener.calls) == 10
