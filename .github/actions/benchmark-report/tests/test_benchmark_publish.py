@@ -402,6 +402,50 @@ def test_publish_cli_uses_environment_token_and_writes_skip_outputs(tmp_path, mo
     assert not api.writes
 
 
+def test_publish_cli_links_to_publishing_run_without_changing_source_identity(tmp_path, monkeypatch):
+    api = FakeGitHub()
+    monkeypatch.setattr(cli, "GitHub", lambda token: api)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(api.event))
+    env = {
+        "GH_TOKEN": "synthetic-token",
+        "GITHUB_EVENT_NAME": "workflow_run",
+        "GITHUB_EVENT_PATH": str(event_path),
+        "GITHUB_REPOSITORY": "PostHog/sdk",
+        "GITHUB_RUN_ID": "999",
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+    }
+    out = tmp_path / "out"
+    assert (
+        cli.main(
+            [
+                "--mode",
+                "publish",
+                "--workflow-path",
+                ".github/workflows/benchmarks.yml",
+                "--artifact-name",
+                "benchmark-results",
+                "--report-key",
+                "node-performance",
+                "--sdk",
+                "posthog-node",
+                "--output-directory",
+                str(out),
+            ],
+            env,
+        )
+        == 0
+    )
+    report = (out / "report.md").read_text()
+    link = "[Full report and diagnostics](https://github.com/PostHog/sdk/actions/runs/999)"
+    assert link in report and link in api.writes[0][2]["body"]
+    assert (tmp_path / "summary.md").read_text() == report
+    comparison = json.loads((out / "comparison.json").read_text())
+    assert comparison["publication"]["run_id"] == 10
+    assert "<!-- sdk-performance-source:20:10:1 -->" in api.writes[0][2]["body"]
+    assert (ROOT + "/actions/runs/10/artifacts", "GET") in api.calls
+
+
 def test_newer_attempt_updates_older_same_run_report():
     api = FakeGitHub()
     api.run["run_attempt"] = api.event["workflow_run"]["run_attempt"] = 2

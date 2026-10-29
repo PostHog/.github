@@ -105,8 +105,11 @@ absolute-delta median/min/max, original metric samples, parameters, checkpoints,
 failure explanations and per-runner contexts. Its numeric comparison status remains
 `inconclusive`: the review filter makes no statistical-confidence claim. Environment,
 resource-limit and instrumentation details live in this diagnostic artifact rather
-than the comment. When GitHub run metadata is available, a trusted run link points
-to the full report and diagnostics. Markdown includes up to three raw failure
+than the comment. When GitHub run metadata is available, the diagnostics link points
+to the reporting run that writes `report.md`, `comparison.json` and the step summary.
+In publish mode this is the trusted publishing run, not the SDK measurement run;
+source-run identity still controls artifact verification and comment ordering.
+Markdown includes up to three raw failure
 explanations per side, but never raw stdout/stderr.
 
 Markdown is bounded below 58,000 bytes; `comparison.json` retains omitted rows.

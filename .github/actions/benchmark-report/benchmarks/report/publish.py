@@ -206,12 +206,12 @@ class Publisher:
         self.api.api(f"{self.root}/issues/{pr['number']}/comments", "POST", {"body": body})
         return "created"
 
-    def publish(self, event: dict) -> tuple[dict, str]:
+    def publish(self, event: dict, *, report_run_id: str | None = None) -> tuple[dict, str]:
         try:
             run = self.verified_run(event)
             pr, target, fallback = self.associate(run)
             self.comparison = self.results(run, target)
-            self.report = render(self.comparison, repository=self.repository, run_id=run["id"])
+            self.report = render(self.comparison, repository=self.repository, run_id=report_run_id)
             status = self.upsert(event, run, pr, target, fallback)
             self.comparison["publication"] = {
                 "status": status,

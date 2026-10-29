@@ -80,7 +80,7 @@ def main(argv=None, environ=None) -> int:
                 args.report_key,
                 args.sdk,
             )
-            comparison, report = publisher.publish(event)
+            comparison, report = publisher.publish(event, report_run_id=env.get("GITHUB_RUN_ID"))
         write_outputs(args.output_directory, comparison, report, env)
         return 1 if comparison.get("execution_failed") else 0
     except (InvalidResult, OSError, ValueError) as exc:
