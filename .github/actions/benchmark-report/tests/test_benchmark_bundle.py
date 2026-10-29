@@ -89,7 +89,9 @@ def test_collect_preserves_documents_and_offline_bundle_render(tmp_path, monkeyp
     assert any("change_percent" in row for row in comparison["rows"])
     report = (output / "report.md").read_text()
     decoded = html.unescape(report).replace("\u200b", "")
-    assert "CPU-0" in decoded and "CPU-1" in decoded and "Shard: shard-1" in decoded
+    assert "Shard: shard-1" in decoded
+    assert comparison["shards"]["shard-0"]["context"]["head"]["execution"]["cpu"] == "CPU-0"
+    assert comparison["shards"]["shard-1"]["context"]["head"]["execution"]["cpu"] == "CPU-1"
     assert cli.main(["--bundle-results", str(bundle_path), "--output-directory", str(tmp_path / "render")], {}) == 0
     assert (tmp_path / "render/report.md").read_text() == report
 
@@ -333,7 +335,8 @@ def test_sixteen_shard_report_is_bounded_and_escaped():
     result["rows"] *= 100
     report = render(result)
     assert len(report.encode()) < MAX_REPORT_BYTES
-    assert report.count("### Shard:") == 16
+    assert len(result["shards"]) == 16
+    assert "Shard:" in report and "per-runner environments" in report
     assert "<script>" not in report and "@all" not in report and "PRIVATE RAW LOG" not in report
 
 

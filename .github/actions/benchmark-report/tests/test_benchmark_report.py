@@ -34,7 +34,7 @@ def test_producer_fixtures_render_with_checkpoints(sdk):
     assert row["pairs"] == 2
     assert row["paired_delta"]["min"] <= row["paired_delta"]["median"] <= row["paired_delta"]["max"]
     report = render(result)
-    assert "inconclusive" in report and "Resource limits:" in report
+    assert "View all results" in report and "resource limits" in report
     assert "confidence intervals" in report
     assert head["revision"]["commit"] in report
     assert len(report.encode()) < MAX_REPORT_BYTES
@@ -104,7 +104,7 @@ def test_escaped_context_stays_within_report_budget(tmp_path):
     )
     report = (output / "report.md").read_text()
     assert len(report.encode()) < MAX_REPORT_BYTES
-    assert "flags" in report
+    assert "Evaluate one boolean flag" in report
 
 
 def test_unavailable_explanations_are_visible_and_escaped():
@@ -300,16 +300,14 @@ def test_variability_is_descriptive_even_for_large_shift(values):
     assert all(r["status"] in ("inconclusive", "unavailable") for r in result["rows"])
 
 
-def test_real_node_headline_covers_timing_allocations_and_memory():
+def test_legacy_measurements_remain_visible_without_review_flags():
     head = load_result(FIXTURES / "node-headline.json")
     base = copy.deepcopy(head)
     base["revision"].update(role="base", commit="a" * 40)
     result = compare(base, head)
     assert sum(r["status"] == "unavailable" for r in result["rows"]) >= 12
-    headline = headline_rows(result)
-    identities = {(r["workload"], r["metric"]) for r in headline}
-    assert len(headline) == 12
-    assert all("base_median" in r for r in headline)
+    assert headline_rows(result) == []
+    identities = {(r["workload"], r["metric"]) for r in result["rows"] if "base_median" in r}
     assert ("flags.single.boolean", "elapsed_time_per_op") in identities
     for size in (10, 100, 1000):
         assert (f"flags.all.{size}", "elapsed_time_per_op") in identities
@@ -321,9 +319,10 @@ def test_real_node_headline_covers_timing_allocations_and_memory():
     report = render(result)
     assert "unsupported" not in report.split("<details>")[0]
     assert "unsupported" in report.split("<details>")[1]
-    # Execution failures, unlike unsupported instrumentation, take precedence.
     head["benchmarks"][1].update(status="timeout")
-    assert headline_rows(compare(base, head))[0]["execution_failed"]
+    failed = compare(base, head)
+    assert headline_rows(failed) == []
+    assert "Benchmark execution failed" in render(failed).split("<details>")[0]
 
 
 def test_report_bound_includes_escaped_headlines_and_context():

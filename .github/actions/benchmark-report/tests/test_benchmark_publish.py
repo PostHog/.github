@@ -276,7 +276,7 @@ def test_current_pr_and_attempt_rechecked_immediately_before_write(change):
         api.before_final_pr = lambda: api.pr["base"].update(sha="d" * 40)
     result, report = publisher(api).publish(api.event)
     assert result["publication"]["status"] == "skipped" and not api.writes
-    assert "Informational medians" in report
+    assert "View all results" in report
 
 
 def test_invalid_or_duplicate_bot_markers_fail_closed():

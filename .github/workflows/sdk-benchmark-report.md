@@ -80,21 +80,37 @@ metric requires identical unit, direction, quality, method, scope/configuration,
 paired repetition IDs and operation counts. Missing or incompatible metrics are
 explicit rows, never zeros. Zero baselines have no percentage change.
 
-The report shows medians, percentage change in the median, and descriptive
-paired absolute-delta median/min/max. JSON retains individual paired percentage
-changes, original metric samples, parameters, checkpoints, failure explanations
-with pass/repetition identities, and both contexts. Markdown shows up to three
-raw failure explanations per side; raw stdout/stderr are never copied.
-All numeric comparisons are **inconclusive**: these ranges are not calibrated
-confidence intervals. There is no universal threshold or aggregate score.
-Incomplete repetitions are labeled. Execution failures sort first. The headline
-is capped at 12 rows, preferring representative single-flag timing, all-flags
-scaling timing/allocation bytes, load/refresh memory, and capture/drain cases.
-Selection uses shared workload parameters and metric semantics, not runtime
-profiler logic. Unsupported measurements remain in the collapsible details
-rather than crowding out numerical headline rows. Markdown is bounded below 58,000 bytes;
-`comparison.json` retains omitted rows. Artifact text is escaped, URLs/mentions
-are neutralized, and raw stderr is not included in reports.
+The comment and Actions summary start with an execution/comparison summary and
+only changes worth reviewing. A metric is flagged when its median changes by at
+least 5% and all six complete paired measurements agree strictly on direction.
+A tied pair, undefined percentage, incomplete repetition set or incompatible
+measurement cannot qualify. The metric's lower/higher-is-better direction determines
+whether the observed change is called an improvement or regression. This is an
+informational noise filter, not a statistical significance test or a CI gate.
+
+The headline shows at most 12 flagged metrics, ordered by absolute percentage
+change; additional flags remain in the collapsed **View all results** table.
+Unsuccessful execution or incomplete/incompatible comparisons suppress the headline
+and explicitly state that no overall conclusion is available. Unsupported metrics
+remain visible in all results and do not themselves constitute execution failure.
+
+Tables use readable workload/metric names, scaled time and binary-size units, and
+phrases such as “5% less time.” Values are medians; percentages are changes in those
+medians, not rounded display values. Small nonzero changes are shown as “<0.1%.”
+Per-row assessment distinguishes flags, unflagged results, and unavailable or
+incompatible measurements. Each sharded result retains its shard association.
+
+`comparison.json` retains the full precision, individual paired percentage changes,
+absolute-delta median/min/max, original metric samples, parameters, checkpoints,
+failure explanations and per-runner contexts. Its numeric comparison status remains
+`inconclusive`: the review filter makes no statistical-confidence claim. Environment,
+resource-limit and instrumentation details live in this diagnostic artifact rather
+than the comment. When GitHub run metadata is available, a trusted run link points
+to the full report and diagnostics. Markdown includes up to three raw failure
+explanations per side, but never raw stdout/stderr.
+
+Markdown is bounded below 58,000 bytes; `comparison.json` retains omitted rows.
+Artifact-provided text is escaped and its URLs/mentions are neutralized.
 
 ## Sharded collection and bundle v1
 

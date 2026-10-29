@@ -39,7 +39,7 @@ def main(argv=None, environ=None) -> int:
             require(args.shard_manifest and args.shard_directory, "Manifest and shard directory are required")
             bundle, revisions = collect(args.shard_manifest, args.shard_directory)
             comparison = compare_bundle(bundle, source_status=args.source_status or None)
-            report = render(comparison)
+            report = render(comparison, repository=env.get("GITHUB_REPOSITORY"), run_id=env.get("GITHUB_RUN_ID"))
             directory = Path(args.output_directory)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "bundle.json").write_bytes(encode_bundle(bundle))
@@ -56,7 +56,7 @@ def main(argv=None, environ=None) -> int:
                     load_result(args.head_results),
                     source_status=args.source_status or None,
                 )
-            report = render(comparison)
+            report = render(comparison, repository=env.get("GITHUB_REPOSITORY"), run_id=env.get("GITHUB_RUN_ID"))
         else:
             require(
                 not (

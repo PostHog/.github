@@ -201,7 +201,7 @@ class Publisher:
             run = self.verified_run(event)
             pr, target, fallback = self.associate(run)
             self.comparison = self.results(run, target)
-            self.report = render(self.comparison)
+            self.report = render(self.comparison, repository=self.repository, run_id=run["id"])
             status = self.upsert(event, run, pr, target, fallback)
             self.comparison["publication"] = {
                 "status": status,

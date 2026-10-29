@@ -1,10 +1,37 @@
 """Render bounded Markdown from data, never artifact-provided markup or URLs."""
 
 import json
+import re
 import unicodedata
 from pathlib import Path
 
 MAX_REPORT_BYTES = 58_000  # Reserve room for the publisher's trusted markers.
+REVIEW_THRESHOLD_PERCENT = 5
+REVIEW_PAIRS = 6
+
+SINGLE_FLAG_NAMES = {
+    "boolean": "Evaluate one boolean flag",
+    "rollout": "Evaluate a rollout flag",
+    "variant": "Evaluate a multivariate flag",
+    "property": "Evaluate a property-filtered flag",
+    "regex": "Evaluate a regex-filtered flag",
+    "cohort": "Evaluate a cohort-filtered flag",
+    "early": "Evaluate a flag (early match)",
+    "late": "Evaluate a flag (late match)",
+    "no-match": "Evaluate a flag (no match)",
+}
+METRIC_NAMES = {
+    "elapsed_time_per_op": "Time per operation",
+    "process_cpu_time_per_op": "Process CPU time per operation",
+    "caller_thread_cpu_time_per_op": "Caller-thread CPU time per operation",
+    "allocated_bytes_per_op": "Allocated memory per operation",
+    "allocations_per_op": "Allocations per operation",
+    "idle_process_rss": "Idle process memory (RSS)",
+    "observed_workload_peak_rss": "Observed peak process memory (RSS)",
+    "process_lifetime_peak_rss": "Lifetime peak process memory (RSS)",
+    "post_settling_process_rss": "Process memory after settling (RSS)",
+    "post_settling_heap_used": "Managed heap after settling",
+}
 
 
 def safe_text(value, limit: int = 240) -> str:
@@ -31,183 +58,217 @@ def json_text(value) -> str:
     return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "\n"
 
 
-def _number(value) -> str:
-    return "—" if value is None else f"{value:,.4g}"
+def _quantity(value, unit: str) -> str:
+    if value is None:
+        return "—"
+    suffix = "/op" if unit.endswith("/op") else ""
+    if unit in ("ns", "ns/op"):
+        scales = ((1e9, "s"), (1e6, "ms"), (1e3, "µs"), (1, "ns"))
+    elif unit in ("bytes", "bytes/op"):
+        scales = ((1024**3, "GiB"), (1024**2, "MiB"), (1024, "KiB"), (1, "B"))
+    else:
+        scales = ((1, unit.removesuffix("/op")),)
+    scale, label = next(((scale, label) for scale, label in scales if abs(value) >= scale), scales[-1])
+    scaled = value / scale
+    number = "<0.01" if 0 < scaled < 0.01 else f"{scaled:,.2f}".rstrip("0").rstrip(".")
+    return f"{number} {safe_text(label, 40)}{suffix}"
 
 
-def _row(row: dict, details=False, workload=None) -> str:
+def _workload_name(identity: str) -> str:
+    if identity.startswith("flags.single."):
+        return SINGLE_FLAG_NAMES.get(identity.removeprefix("flags.single."), identity)
+    match = re.fullmatch(r"flags\.(all|load|refresh)\.([0-9]{1,7})", identity)
+    if match:
+        mode, count = match.groups()
+        count = f"{int(count):,}"
+        return {
+            "all": f"Evaluate all {count} flags",
+            "load": f"Evaluate {count} flags under concurrent load",
+            "refresh": f"Refresh {count} flag definitions",
+        }[mode]
+    match = re.fullmatch(r"capture\.(enqueue|drain)(?:\.(steady|burst))?\.([0-9]{1,7})", identity)
+    if match:
+        mode, strategy, size = match.groups()
+        operation = "Queue an event" if mode == "enqueue" else "Capture and deliver events"
+        schedule = f", {strategy}" if strategy else ""
+        return f"{operation} ({int(size):,}-byte payload{schedule})"
+    return identity
+
+
+def review_change(row: dict) -> str | None:
+    """Descriptive review filter, not a significance test or an execution gate."""
+    change = row.get("change_percent")
+    paired = row.get("paired_change_percent", [])
+    if (
+        row["status"] != "inconclusive"
+        or row.get("execution_failed")
+        or change is None
+        or abs(change) < REVIEW_THRESHOLD_PERCENT
+        or row.get("pairs") != REVIEW_PAIRS
+        or len(paired) != REVIEW_PAIRS
+        or "Incomplete repetitions" in row.get("reasons", [])
+        or not all(value is not None and (value > 0 if change > 0 else value < 0) for value in paired)
+    ):
+        return None
+    direction = (row["head"] or row["base"])["direction"]
+    improved = change < 0 if direction == "lower" else change > 0
+    return "improvement" if improved else "regression"
+
+
+def _change(row: dict, unit: str) -> str:
+    change = row.get("change_percent")
+    if change is None:
+        return "—"
+    if change == 0:
+        return "No observed change"
+    amount = "<0.1" if abs(change) < 0.1 else f"{abs(change):.1f}".rstrip("0").rstrip(".")
+    if unit in ("ns", "ns/op"):
+        description = "less time" if change < 0 else "more time"
+    elif unit in ("bytes", "bytes/op"):
+        description = "less memory" if change < 0 else "more memory"
+    elif unit in ("count", "count/op"):
+        description = "fewer" if change < 0 else "more"
+    else:
+        description = "lower" if change < 0 else "higher"
+    return f"{amount}% {description}"
+
+
+def _row(row: dict, *, details=False, workload=None) -> str:
     metric = row["head"] or row["base"] or {}
-    label = safe_text(row["metric"], 100)
+    unit = metric.get("unit", "")
+    label = safe_text(METRIC_NAMES.get(row["metric"], row["metric"]), 160)
     if metric.get("quality") == "estimated":
         label += " (estimated)"
-    label += " · " + safe_text(metric.get("unit", ""), 30)
-    change = _number(row.get("change_percent"))
-    if row.get("change_percent") is not None:
-        change += "%"
-    status = safe_text(row["status"])
-    if row["status"] != "inconclusive":
-        status += ": " + safe_text("; ".join(row.get("reasons", [])), 180)
+    workload_label = safe_text(_workload_name(row["workload"]), 240)
+    if details and "shard_id" in row:
+        workload_label += "<br>Shard: " + safe_text(row["shard_id"], 100)
+    line = (
+        f"| {workload_label} | {label} | {_quantity(row.get('base_median'), unit)} | "
+        f"{_quantity(row.get('head_median'), unit)} | {_change(row, unit)} |"
+    )
     if details:
-        status += "; " + safe_text("; ".join(row.get("reasons", [])), 220)
-        if "paired_delta" in row:
-            delta = row["paired_delta"]
-            status += (
-                f"; {row['pairs']} pairs, paired Δ median {_number(delta['median'])}, "
-                f"range {_number(delta['min'])}…{_number(delta['max'])}"
-            )
-        for explanation in row.get("explanations", []):
-            status += "; " + safe_text(explanation, 220)
+        flagged = review_change(row)
+        assessment = f"Worth reviewing: observed {flagged}" if flagged else "Not flagged"
+        if row["status"] != "inconclusive":
+            assessment = safe_text(row["status"])
+        reasons = [r for r in row.get("reasons", []) if r != "Descriptive only; uncertainty is not calibrated"]
+        reasons.extend(row.get("explanations", []))
+        for reason in dict.fromkeys(reasons):
+            assessment += "; " + safe_text(reason, 220)
         for role, context in (workload or {}).items():
             failures = context.get("failures", [])
             for failure in failures[:3]:
                 reason = failure.get("reason") or failure.get("error")
                 if reason:
-                    status += (
+                    assessment += (
                         f"; {role} {safe_text(failure['pass'], 32)} repetition {failure['repetition']}: "
                         + safe_text(reason, 220)
                     )
             if len(failures) > 3:
-                status += f"; {len(failures) - 3} more {role} failures in comparison.json"
-        status += "; method: " + safe_text(metric.get("method", "unavailable"), 160)
-    workload_label = safe_text(row["workload"], 100)
-    if "shard_id" in row:
-        workload_label += " · shard: " + safe_text(row["shard_id"], 100)
-    return (
-        f"| {workload_label} | {label} | {_number(row.get('base_median'))} | "
-        f"{_number(row.get('head_median'))} | {change} · {status} |\n"
+                assessment += f"; {len(failures) - 3} more {role} failures in comparison.json"
+        line += f" {assessment} |"
+    return line + "\n"
+
+
+def _incomplete(comparison: dict) -> bool:
+    return not any("base_median" in row for row in comparison["rows"]) or any(
+        row["status"] in ("not comparable", "no baseline", "missing head")
+        or "Incomplete repetitions" in row.get("reasons", [])
+        for row in comparison["rows"]
     )
 
 
 def headline_rows(comparison: dict) -> list[dict]:
-    """Show representative workload families without letting unsupported rows crowd out measurements."""
-    rows = comparison["rows"]
-    selected = []
-    identities = set()
-
-    def add(row):
-        identity = (row["workload"], row["metric"])
-        if identity not in identities:
-            identities.add(identity)
-            selected.append(row)
-
-    for row in rows:
-        if row.get("execution_failed"):
-            add(row)
-
-    workloads = comparison["workloads"]
-
-    def parameters(workload):
-        context = workloads[workload]
-        return (context.get("head") or context["base"])["parameters"]
-
-    def pick(workload, metric):
-        for row in rows:
-            if row["workload"] == workload and row["metric"] == metric and "base_median" in row:
-                add(row)
-                break
-
-    # These are workload/metric semantics shared by adapters, not profiler-specific behavior.
-    for mode, metric, all_sizes in (
-        ("single", "elapsed_time_per_op", False),
-        ("all", "elapsed_time_per_op", True),
-        ("all", "allocated_bytes_per_op", True),
-        ("all", "observed_workload_peak_rss", False),
-        ("refresh", "post_settling_process_rss", False),
-        ("capture", "elapsed_time_per_op", False),
-        ("drain", "observed_workload_peak_rss", False),
-        ("single", "process_cpu_time_per_op", False),
-    ):
-        candidates = [w for w in workloads if parameters(w).get("mode") == mode]
-        # Select the boolean single case, ascending scaling sizes, and the largest payload.
-        # Parameter values are untrusted arbitrary JSON; sorting serialized values is total.
-        candidates.sort(
-            key=lambda w: (
-                parameters(w).get("flag_index") != 0 if mode == "single" else False,
-                len(str(parameters(w).get("flag_count", 0))),
-                str(parameters(w).get("flag_count", 0)),
-                len(str(parameters(w).get("payload_bytes", 0))),
-                str(parameters(w).get("payload_bytes", 0)),
-                w,
-            ),
-            reverse=mode in ("capture", "drain"),
-        )
-        for workload in candidates:
-            before = len(selected)
-            pick(workload, metric)
-            if not all_sizes and len(selected) > before:
-                break
-
-    for row in rows:
-        if "base_median" in row:
-            add(row)
-    for row in rows:
-        add(row)
-    return selected[:12]
+    if comparison["execution_failed"] or _incomplete(comparison):
+        return []
+    return sorted(
+        (row for row in comparison["rows"] if review_change(row)),
+        key=lambda row: (-abs(row["change_percent"]), row["workload"], row["metric"]),
+    )
 
 
-def _environment(contexts: dict, *, sharded=False) -> list[str]:
-    chunks = []
-    text_limit, resource_limit = (96, 240) if sharded else (240, 1000)
-    for role in ("base", "head"):
-        context = contexts[role]
-        execution = context["execution"]
-        chunks.append(f"**{role.title()}**: {safe_text(context['revision']['commit'])}")
-        if context["revision"].get("dirty"):
-            chunks.append(" (dirty working tree)")
-        chunks.append(
-            f" · {safe_text(execution['runtime'], text_limit)} {safe_text(execution['runtime_version'], text_limit)}"
-            f" · {safe_text(execution['os'], text_limit)}/{safe_text(execution['arch'], text_limit)}"
-            f" · CPU: {safe_text(execution['cpu'], text_limit)}"
-            f" · runner: {safe_text(execution['runner_class'], text_limit)}\n\n"
-        )
-        chunks.append(
-            "Resource limits: "
-            + safe_text(json.dumps(execution["resource_limits"], sort_keys=True), resource_limit)
-            + "\n\n"
-        )
-    return chunks
-
-
-def render(comparison: dict) -> str:
-    chunks = [
-        f"## SDK performance: {safe_text(comparison['sdk'])}\n\n",
-        "Informational medians of paired samples; all numeric changes are **inconclusive**. "
-        "Paired ranges describe variability, not confidence intervals. No aggregate score or performance gate.\n\n",
-    ]
+def render(comparison: dict, *, repository=None, run_id=None) -> str:
+    flagged = headline_rows(comparison)
+    chunks = [f"## SDK performance: {safe_text(comparison['sdk'])}\n\n"]
     if comparison["execution_failed"]:
-        chunks.append("**Benchmark execution failed. Partial samples are not evidence of improvement.**\n\n")
-    if comparison["comparison_version"] == 2:
-        chunks.append("Each shard is paired on its own runner; environments below apply only to that shard.\n\n")
-        for identity, shard in comparison["shards"].items():
-            chunks.append(f"### Shard: {safe_text(identity)}\n\n")
-            chunks.extend(_environment(shard["context"], sharded=True))
+        chunks.append("**Benchmark execution failed. No overall performance conclusion is available.**\n\n")
+    elif _incomplete(comparison):
+        chunks.append(
+            "**No overall performance conclusion is available. "
+            "Measurements are missing, incomplete or incompatible.**\n\n"
+        )
+    elif flagged:
+        improvements = sum(review_change(row) == "improvement" for row in flagged)
+        regressions = len(flagged) - improvements
+        counts = []
+        for count, name in ((improvements, "improvement"), (regressions, "regression")):
+            if count:
+                counts.append(f"{count} observed {name}{'s' if count != 1 else ''}")
+        chunks.append(
+            f"**{len(flagged)} change{'s' if len(flagged) != 1 else ''} worth reviewing: {', '.join(counts)}.**\n\n"
+        )
     else:
-        chunks.extend(_environment(comparison["context"]))
-    chunks.append("Full comparison, configuration, samples and checkpoints: `comparison.json` (job artifact).\n\n")
-    table = "| Workload | Metric · unit | Base | PR | Change · interpretation |\n| --- | --- | --- | --- | --- |\n"
-    chunks.append(table)
-    rows = comparison["rows"]
-    size = len("".join(chunks).encode("utf-8"))
-    for row in headline_rows(comparison):
-        line = _row(row)
-        if size + len(line.encode("utf-8")) > MAX_REPORT_BYTES - 1500:
-            break
-        chunks.append(line)
-        size += len(line.encode("utf-8"))
-    chunks.append("\n<details>\n<summary>Detailed cases and paired variability</summary>\n\n" + table)
+        chunks.append("**Benchmarks completed. No changes flagged for review.**\n\n")
+    chunks.append(
+        "Flags require at least a 5% change in the median and all six pairs agreeing on direction. "
+        "This is a noise filter, not proof of a performance change or a CI gate.\n\n"
+    )
+    table = "| Test | Measurement | Before PR | With PR | Change |\n| --- | --- | ---: | ---: | --- |\n"
+    if flagged:
+        chunks.append(table)
+        chunks.extend(_row(row) for row in flagged[:12])
+        if len(flagged) > 12:
+            chunks.append(f"\nShowing the 12 largest flagged changes; {len(flagged) - 12} more are in all results.\n")
+    chunks.append(
+        "\n<details>\n<summary>View all results</summary>\n\n"
+        "| Test | Measurement | Before PR | With PR | Change | Assessment |\n"
+        "| --- | --- | ---: | ---: | --- | --- |\n"
+    )
+    # Reserve the footer and explanations before adding bounded rows.
     size = len("".join(chunks).encode("utf-8"))
     shown = 0
-    for row in rows:
+    for row in comparison["rows"]:
         line = _row(row, details=True, workload=comparison["workloads"][row["workload"]])
-        if size + len(line.encode("utf-8")) > MAX_REPORT_BYTES - 1000:
+        if size + len(line.encode("utf-8")) > MAX_REPORT_BYTES - 3000:
             break
         chunks.append(line)
         size += len(line.encode("utf-8"))
         shown += 1
-    chunks.append("\n</details>\n\n")
     chunks.append(
-        f"{len(rows)} metric rows; {shown} detailed rows shown. "
-        "Omitted or shortened data remain in `comparison.json`.\n"
+        "\nValues are medians of paired measurements. Not flagged does not mean unchanged. "
+        "Unavailable means a measurement could not be provided, not zero. "
+        "Estimated allocation measurements retain their instrumentation uncertainty. "
+        "RSS measures the whole process, not just SDK allocations; observed peaks are sampled checkpoints. "
+        "Paired ranges in the diagnostics describe variability, not confidence intervals.\n\n"
+    )
+    if comparison["comparison_version"] == 2:
+        chunks.append(
+            "Each shard uses its own runner; compare Before PR against With PR within a row, not across shards.\n\n"
+        )
+        context = next(iter(comparison["shards"].values()))["context"]
+    else:
+        context = comparison["context"]
+    chunks.append("</details>\n\n")
+    revisions = []
+    for role in ("base", "head"):
+        revision = context[role]["revision"]
+        revisions.append(
+            f"`{safe_text(revision['commit'])}`" + (" (dirty working tree)" if revision.get("dirty") else "")
+        )
+    chunks.append(f"Compared {revisions[0]} → {revisions[1]}.\n\n")
+    # Link only to a GitHub run built from caller metadata, never a result-supplied URL.
+    if (
+        isinstance(repository, str)
+        and len(repository) <= 201
+        and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+        and all(part not in (".", "..") for part in repository.split("/"))
+        and re.fullmatch(r"[1-9][0-9]{0,18}", str(run_id))
+    ):
+        chunks.append(f"[Full report and diagnostics](https://github.com/{repository}/actions/runs/{run_id})\n\n")
+    chunks.append(
+        f"{len(comparison['rows'])} metric rows; {shown} rows shown in all results. "
+        "Omitted or shortened data remain in `comparison.json`, including per-runner environments, "
+        "resource limits, measurement methods, samples and checkpoints.\n"
     )
     report = "".join(chunks)
     assert len(report.encode("utf-8")) < MAX_REPORT_BYTES
