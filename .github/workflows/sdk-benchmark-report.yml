@@ -45,7 +45,7 @@ jobs:
                   egress-policy: audit
 
             - name: Verify source run and publish report
-              uses: PostHog/.github/.github/actions/benchmark-report@04f8421ec4daa7f4066eaeb4c53621ba79ddc3ca # SDK benchmark reporting (PostHog/.github PR #84)
+              uses: PostHog/.github/.github/actions/benchmark-report@3322f26f21f088ad5e5960d65a916971e309ac0b # SDK benchmark reporting (PostHog/.github PR #84)
               env:
                   GH_TOKEN: ${{ github.token }}
               with:
