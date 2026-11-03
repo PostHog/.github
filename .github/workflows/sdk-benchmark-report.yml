@@ -1,0 +1,66 @@
+name: SDK benchmark report
+
+on:
+    workflow_call:
+        inputs:
+            workflow-path:
+                description: 'Expected producer workflow path in the calling repository.'
+                required: true
+                type: string
+            artifact-name:
+                description: 'Exact producer artifact name containing paired results or a shard bundle, plus revisions.json.'
+                required: true
+                type: string
+            report-key:
+                description: 'Stable comment namespace, unique per SDK within the calling repository.'
+                required: true
+                type: string
+            sdk:
+                description: 'Expected SDK identifier in every result document.'
+                required: true
+                type: string
+
+permissions: {}
+
+jobs:
+    report:
+        # A default-branch workflow_run caller is the trust boundary, including for fork PRs.
+        if: github.event_name == 'workflow_run' && github.event.action == 'completed'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        permissions:
+            contents: read
+            actions: read
+            pull-requests: write
+        # Serialize publishers even when workflow_run has no PR association (common for forks).
+        # The publisher rechecks head/attempt and source-run ordering immediately before writing.
+        concurrency:
+            group: sdk-benchmark-report-${{ github.repository }}-${{ inputs.report-key }}
+            cancel-in-progress: false
+            queue: max
+        steps:
+            - name: Audit runner egress
+              uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+              with:
+                  egress-policy: audit
+
+            - name: Verify source run and publish report
+              uses: PostHog/.github/.github/actions/benchmark-report@04f8421ec4daa7f4066eaeb4c53621ba79ddc3ca # SDK benchmark reporting (PostHog/.github PR #84)
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              with:
+                  mode: publish
+                  workflow-path: ${{ inputs.workflow-path }}
+                  artifact-name: ${{ inputs.artifact-name }}
+                  report-key: ${{ inputs.report-key }}
+                  sdk: ${{ inputs.sdk }}
+                  output-directory: ${{ runner.temp }}/sdk-benchmark-report
+
+            - name: Preserve rendered report
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: sdk-benchmark-report-${{ inputs.report-key }}
+                  path: ${{ runner.temp }}/sdk-benchmark-report
+                  if-no-files-found: ignore
+                  retention-days: 14
