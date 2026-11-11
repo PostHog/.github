@@ -7,11 +7,10 @@ community health files. Other PostHog repositories run this code in their CI,
 often with write tokens and secrets. Many callers are public SDK repositories
 that accept fork PRs.
 
-Read this as your checklist and your calibration. It replaces the Django
-fallback checklist in your prompt (`permission_classes`, HogQL, `team_id`),
-which does not apply here. Your threat model and the generic vulnerability
-classes still apply. Assess every workflow and action change yourself. The
-Semgrep checks are a backstop, not the review.
+Read this as your checklist and your calibration. It replaces the fallback
+checklist in your prompt, which does not apply here. Your threat model and the
+generic vulnerability classes still apply. Assess every workflow and action
+change yourself. The Semgrep checks are a backstop, not the review.
 
 ## How to read a diff here
 
