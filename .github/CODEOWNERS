@@ -5,3 +5,6 @@ workflows/ @PostHog/team-security
 
 # we explicitly want this Action to be owned by security, even if the above rules are removed
 .github/workflows/ci-security.yaml @PostHog/team-security
+
+# the cloud platform team maintains the container image metadata action
+.github/actions/container-image-metadata/ @PostHog/team-cloud-platform
