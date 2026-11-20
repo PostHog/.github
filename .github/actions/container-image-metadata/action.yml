@@ -148,24 +148,28 @@ runs:
       run: |
         # The three values below go to GITHUB_OUTPUT and into the
         # metadata-action annotations input, whose parser can take a
-        # carriage return as a line break and which compiles each entry as
-        # a Handlebars template. sanitize() keeps a value from starting
+        # carriage return as a line break, opens a quoted field at a double
+        # quote that directly follows a comma, and compiles each entry as a
+        # Handlebars template. sanitize() keeps a value from starting
         # another output key or annotation by replacing every ASCII control
         # character (0x01-0x1F and DEL; an explicit range, because
         # [[:cntrl:]] under C.UTF-8 differs between platforms) with a space,
-        # and keeps it from being read as a template by breaking every "{{"
-        # into "{ {". It runs before the length cut, and a cut prefix plus
-        # "..." cannot form a new "{{".
+        # keeps it from being read as a template by breaking every "{{" into
+        # "{ {", and keeps it from opening a quoted field by turning ',"'
+        # into ', "'. It runs before the length cut, and a cut prefix plus
+        # "..." cannot form a new "{{" or ',"'.
         sanitize() {
           local value="${1//[$'\001'-$'\037'$'\177']/ }"
           local open='{{' broken='{ {'
+          local comma_quote=',"' spaced=', "'
           while [[ "${value}" == *"${open}"* ]]; do
             value="${value//"${open}"/"${broken}"}"
           done
+          value="${value//"${comma_quote}"/"${spaced}"}"
           printf '%s' "${value}"
         }
-        # No pipeline here: a message larger than the pipe buffer would fail
-        # the step with SIGPIPE under pipefail.
+        # No pipeline here: with printf | head, head exits after the first line
+        # and printf, still writing a large remainder, fails with SIGPIPE.
         subject="${COMMIT_MESSAGE%%$'\n'*}"
         if [ -z "${subject}" ]; then
           subject="$(git log -1 --format=%s)"
