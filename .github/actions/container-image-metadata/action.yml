@@ -194,6 +194,8 @@ runs:
       if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && inputs.publish-ordered-release-tag != 'true' && inputs.generate-ordered-release-tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       continue-on-error: true
       shell: bash
+      env:
+        ORDERED_RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         set -euo pipefail
 
@@ -202,6 +204,14 @@ runs:
           printf 'tag=\n' >> "$GITHUB_OUTPUT"
           exit 0
         }
+
+        # The step condition compares the ref ignoring letter case; Git refs do not.
+        if [ -z "${ORDERED_RELEASE_DEFAULT_BRANCH:-}" ]; then
+          skip_ordered_release_tag "the default branch is unknown"
+        fi
+        if [ "${GITHUB_REF:-}" != "refs/heads/${ORDERED_RELEASE_DEFAULT_BRANCH}" ]; then
+          skip_ordered_release_tag "the ref is not exactly the default branch"
+        fi
 
         # Test the behavior that the bounds need, not the version text.
         # Ubuntu 26.04 runners ship uutils coreutils, and GNU and uutils timeout behave the same here.
@@ -301,6 +311,7 @@ runs:
         ORDERED_RELEASE_IMAGE: ${{ inputs.images }}
         ORDERED_RELEASE_TAG: ${{ inputs.ordered-release-tag }}
         ORDERED_RELEASE_DIGEST: ${{ inputs.ordered-release-digest }}
+        ORDERED_RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         set -euo pipefail
 
@@ -308,6 +319,21 @@ runs:
           printf '::error title=Invalid ordered image alias input::%s\n' "$1" >&2
           exit 2
         }
+
+        skip_publication() {
+          printf '::warning::Skipping ordered image alias publication because %s\n' "$1"
+          printf 'skip=true\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
+        # The step condition compares the ref ignoring letter case; Git refs do not.
+        # skip=true also keeps the publication step from running.
+        if [ -z "${ORDERED_RELEASE_DEFAULT_BRANCH:-}" ]; then
+          skip_publication "the default branch is unknown"
+        fi
+        if [ "${GITHUB_REF:-}" != "refs/heads/${ORDERED_RELEASE_DEFAULT_BRANCH}" ]; then
+          skip_publication "the ref is not exactly the default branch"
+        fi
 
         repository="${ORDERED_RELEASE_IMAGE:-}"
         ordered_tag="${ORDERED_RELEASE_TAG:-}"

@@ -35,7 +35,7 @@ Ordered release aliases require two invocations of the action. The first invocat
 
 Ordered tag generation and publication need:
 
-- A `push` or `workflow_dispatch` event on the repository's default branch. On any other event or ref, schedules included, generation and publication are skipped: `ordered-release-tag` is empty and no alias is published. The standard tags, labels and annotations are still produced.
+- A `push` or `workflow_dispatch` event on the repository's default branch. The ref must match the default branch exactly, letter case included. On any other event or ref, schedules included, generation and publication are skipped: `ordered-release-tag` is empty and no alias is published. The standard tags, labels and annotations are still produced.
 - A checkout of the triggering revision (`GITHUB_SHA`) before the action. If another revision is checked out, no ordered tag is generated.
 - A runner whose `timeout` supports `--kill-after`, as GNU coreutils and uutils coreutils on Ubuntu GitHub-hosted runners do.
 
