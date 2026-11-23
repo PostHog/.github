@@ -35,7 +35,7 @@ Ordered release aliases require two invocations of the action. The first invocat
 
 Ordered tag generation and publication need:
 
-- A `push` or `workflow_dispatch` event on the repository's default branch. On any other event or ref, schedules included, both phases are skipped: `ordered-release-tag` is empty, no alias is published and nothing fails. The standard tags, labels and annotations are still produced. The ref must also match the default branch exactly, letter case included: a ref that differs from it only in letter case passes the step conditions, so generation is skipped with a warning and the publish phase fails.
+- A `push` or `workflow_dispatch` event on the repository's default branch. On any other event or ref, schedules included, both phases are skipped: `ordered-release-tag` is empty, no alias is published and neither phase fails. The standard tags, labels and annotations are still produced. The ref must also match the default branch exactly, letter case included: a ref that differs from it only in letter case passes the step conditions, so generation is skipped with a warning and the publish phase fails.
 - A checkout of the triggering revision (`GITHUB_SHA`) before each invocation. If another revision is checked out, no ordered tag is generated.
 - A runner whose `timeout` supports `--kill-after`, as GNU coreutils and uutils coreutils on Ubuntu GitHub-hosted runners do.
 - `jq` and `curl` on `PATH` for the publish phase's alert, as on Ubuntu GitHub-hosted runners.
@@ -52,17 +52,17 @@ The commit metadata and `Docker meta` steps run in both invocations and fail the
 
 ### Attempts
 
-An attempt starts with a probe: it reads the alias up to twice and, only when neither read succeeds, reads the built digest. When the alias was not read and the built digest was, the probe finds it `absent`, and only then does the attempt write the alias and read it back the same way. A probe that can read neither ends the attempt `unknown` without writing. A read-back that can read neither after the write also ends the attempt `unknown`, so an `unknown` attempt may have written. An alias found at another digest, by either attempt's probe or read-back, ends the phase as `integrity-mismatch` with no further write, so an alias that was already at another digest is never moved.
+An attempt starts with a probe: it reads the alias up to twice and, only when neither read succeeds, reads the built digest. When the alias was not read and the built digest was, the probe calls it `absent`, and only then does the attempt write the alias and read it back the same way. `absent` is an inference from two failed reads, not a confirmed absence: the write goes ahead whatever the registry holds under that tag, so an existing alias that could not be read may be overwritten. What is guaranteed is that a mismatch the action observes, at either attempt's probe or read-back, ends the phase as `integrity-mismatch` with no further write. A probe that can read neither ends the attempt `unknown` without writing. A read-back that can read neither after the write also ends the attempt `unknown`, so an `unknown` attempt may have written.
 
 When the first attempt ends `absent` or `unknown`, the phase waits five seconds and makes a second attempt, which probes again before it writes. The second attempt's result is the phase's result, and the log names the attempt that gave it. When the phase ends without a confirmed alias, the log also carries the registry client's output and exit status from the last failed read and the last write, inside a block that cannot issue workflow commands. A read whose client exited 0 with output that is not a digest is labelled an output-format failure. An exit status of 124 or 137 means the time limit stopped the client.
 
-Two things are visible to a caller: the `ordered-release-result` output of the publish invocation (`steps.alias.outputs.ordered-release-result` in the example), and the result the last step reports in its annotation and alert. They differ when the output is empty. The output is set only by the publication script, and it is empty in four cases:
-- Outside the event and ref gate, nothing runs and nothing fails.
+Two things are visible to a caller: the `ordered-release-result` output of the publish invocation (`steps.alias.outputs.ordered-release-result` in the example), and the result the last step reports in its annotation and alert. They differ when the output is empty, and when a cancellation keeps the last step from running; the table rows with a non-empty output assume the last step runs. The output is set only by the publication script, and it is empty in four cases:
+- Outside the event and ref gate, the publish phase's own steps (validation, publication and the last step) do not run, so the publish phase cannot fail. The commit metadata and `Docker meta` steps still run, as in every invocation.
 - When validation skips publication (no ordered tag, or a failed check), the last step reports `tag-unavailable` or the reason and fails.
 - When the publication script fails before it sets the output, the last step reports `unknown` and fails. A caller that branches on the output cannot tell this case from a validation skip by the output alone; the last step's annotation names the result it reported.
 - When an earlier step of the publish invocation fails, publication and the last step do not run and no alert is sent. When the job is cancelled before or during publication, the last step does not run and no alert is sent; a cancellation during publication may leave the alias written.
 
-A cancellation also stops the last step whatever the output already holds, so an output set before the cancellation comes with no annotation from the last step and no message. A cancellation does not undo what already happened: an alias that publication wrote stays written, and a post the last step already started may still reach Slack.
+A cancellation keeps a last step that has not started from starting, whatever the output already holds. A last step that was already running when the cancellation arrived may have written its error annotation, which it writes before the post, and may have started its post, which may still reach Slack. Nothing already done is undone: an alias that publication wrote stays written.
 
 | `ordered-release-result` output | Result the last step reports | What the publish phase did | Last step | Message |
 |---|---|---|---|---|
@@ -72,7 +72,7 @@ A cancellation also stops the last step whatever the output already holds, so an
 | `integrity-mismatch` | `integrity-mismatch` | Found the alias at another digest in a probe or a read-back and ended the phase with no further write. | Fails. | The same consequence as `unknown`. A re-run cannot clear it. |
 | empty | `tag-unavailable` or the validation reason | Validation skipped publication; nothing was written. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-run all jobs: the failed job alone reuses the build's empty value. |
 | empty | `unknown` | The publication script failed before setting the output; it may have written before it failed. | Fails. | The same as `unknown` above. |
-| empty | None: the last step does not run. | Outside the gate nothing ran; after an earlier failed step publication did not run; after a cancellation before or during publication, publication may have written the alias. | Does not run. | None. |
+| empty | None: the last step does not run. | Outside the gate, validation, publication and the last step did not run; after an earlier failed step, publication did not run; after a cancellation before or during publication, publication may have written the alias. | Does not run. | None. |
 
 ### Alert
 
