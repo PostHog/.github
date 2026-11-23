@@ -63,13 +63,16 @@ inputs:
       and manual dispatch events on the default branch. All other events and
       refs, including schedules, are excluded by an explicit step condition
       and produce no ordered-release annotation; active publication retains
-      its result annotations. The cross-invocation latency budget is at most
-      905 seconds. Generation takes at most 440 seconds: 120 seconds for the
-      treeless history fetch and 300 seconds for the full fetch that follows
-      when it fails. Publication takes at most 465 seconds: two attempts of
-      up to six 20-second read-backs and one 35-second publication each, a
-      5-second pause between them, and 10 seconds for the alert. Each history
-      fetch, read-back and publication has a 10-second kill grace.
+      its result annotations. The bounded operations of both invocations
+      total at most 905 seconds; these are sums of the timed operations, not a
+      limit on either phase, so set each job's timeout-minutes above them.
+      Generation's bounded fetches total at most 440 seconds: 120 seconds for
+      the treeless history fetch and 300 seconds for the full fetch that
+      follows when it fails. Publication's bounded operations total at most
+      465 seconds: two attempts of up to six 20-second read-backs and one
+      35-second publication each, a 5-second pause between them, and 10
+      seconds for the alert. Each history fetch, read-back and publication
+      has a 10-second kill grace.
     default: "false"
   ordered-release-tag:
     required: false
@@ -86,8 +89,8 @@ inputs:
     required: false
     description: >-
       Slack bot token for the publication phase. When the phase fails because
-      the ordered alias is not confirmed, one message is posted to
-      alert-slack-channel. Without a token the phase still fails, with no
+      the ordered alias is not confirmed, the action attempts one post to
+      alert-slack-channel. Without a token the phase still fails, with no Slack
       message.
   alert-slack-channel:
     required: false
@@ -269,8 +272,10 @@ runs:
             printf '::warning::Treeless history fetch failed with status %s, retrying without --filter=tree:0\n' "$fetch_status"
             git config --unset remote.origin.promisor || true
             git config --unset remote.origin.partialclonefilter || true
-            if ! fetch_history 300s; then
-              skip_ordered_release_tag "complete source history could not be fetched"
+            fetch_status=0
+            fetch_history 300s || fetch_status=$?
+            if [ "$fetch_status" -ne 0 ]; then
+              skip_ordered_release_tag "complete source history could not be fetched (status $fetch_status)"
             fi
           fi
         fi
@@ -441,7 +446,7 @@ runs:
           exit 0
         fi
 
-        client_output="$(mktemp -d "${RUNNER_TEMP:-/tmp}/ordered-image-alias.XXXXXX")"
+        client_output="$(mktemp -d "$RUNNER_TEMP/ordered-image-alias.XXXXXX")"
         trap 'rm -rf "$client_output"' EXIT
 
         # Keep the 20s read-back and 35s publication bounds, the two attempts and the 5s pause in sync with the publish-ordered-release-tag latency budget above.
@@ -459,9 +464,13 @@ runs:
             return 0
           fi
 
-          [ "$status" -ne 0 ] || status=65
           mv "$client_output/read" "$client_output/failed-read"
-          printf '%s\n' "$status" > "$client_output/failed-read-status"
+          if [ "$status" -eq 0 ]; then
+            printf 'output format failure, client exit status 0' > "$client_output/failed-read-status"
+            printf 'Client output:\n%s\n' "$output" >> "$client_output/failed-read"
+            return 65
+          fi
+          printf 'exit status %s' "$status" > "$client_output/failed-read-status"
           return "$status"
         }
 
@@ -517,7 +526,7 @@ runs:
           marker="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
           {
             printf '::stop-commands::%s\n' "$marker"
-            printf 'Last failed registry read, exit status %s:\n' "$(cat "$client_output/failed-read-status" 2>/dev/null || printf 'none')"
+            printf 'Last failed registry read, %s:\n' "$(cat "$client_output/failed-read-status" 2>/dev/null || printf 'none')"
             cat "$client_output/failed-read" 2>/dev/null || true
             printf '\nLast alias write, exit status %s:\n' "${write_status:-none}"
             cat "$client_output/write" 2>/dev/null || true
@@ -525,12 +534,14 @@ runs:
           } >&2
         fi
 
-    # The last step of the publish phase and the only one that fails it. Its
-    # condition has no status function, so it does not run after an earlier
-    # step of this invocation failed or the job was cancelled.
+    # The last step of the publish phase and the only one that fails it. It
+    # runs when validation ran and set image (valid inputs) or reason
+    # (publication skipped), so validation's condition is the publish gate.
+    # Its condition has no status function, so it does not run after an
+    # earlier step of this invocation failed or the job was cancelled.
     - name: Check ordered release alias
       id: ordered-release-check
-      if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && inputs.publish-ordered-release-tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      if: steps.ordered-release-validation.outputs.image != '' || steps.ordered-release-validation.outputs.reason != ''
       shell: bash
       env:
         ORDERED_RELEASE_RESULT: ${{ steps.ordered-release-publication.outputs.result }}
@@ -542,9 +553,11 @@ runs:
       run: |
         set -euo pipefail
 
-        token="${ALERT_SLACK_BOT_TOKEN:-}"
+        # set +a and declare +x keep the copy unexported even when the job environment turns on allexport or exports this name.
+        set +a
+        declare +x alert_token="${ALERT_SLACK_BOT_TOKEN:-}"
         unset ALERT_SLACK_BOT_TOKEN
-        if [ -n "$token" ]; then
+        if [ -n "$alert_token" ]; then
           printf '%s\n' 'An alert token was supplied'
         else
           printf '%s\n' 'No alert token was supplied'
@@ -582,10 +595,16 @@ runs:
 
         printf '::error title=Ordered image alias not confirmed::%s. %s. %s.\n' "$status" "$consequence" "$retry"
 
-        if [ -z "$token" ]; then
+        if [ -z "$alert_token" ]; then
           exit 1
         fi
 
+        alert_not_sent() {
+          printf '::warning title=Ordered image alias alert not sent::%s\n' "$1"
+          exit 1
+        }
+
+        body_status=0
         body="$(ALERT_STATUS="$status" ALERT_CONSEQUENCE="$consequence" ALERT_RETRY="$retry" jq -n '
           def none_if_empty: if . == "" then "none" else . end;
           {
@@ -601,25 +620,29 @@ runs:
               "Run: \(env.GITHUB_SERVER_URL)/\(env.GITHUB_REPOSITORY)/actions/runs/\(env.GITHUB_RUN_ID)",
               "\(env.ALERT_CONSEQUENCE). \(env.ALERT_RETRY)."
             ] | join("\n"))
-          }')"
+          }')" || body_status=$?
+        if [ "$body_status" -ne 0 ]; then
+          alert_not_sent "The alert body could not be built, jq exit status $body_status"
+        fi
 
         # The token reaches curl as a header file on a pipe, never as an argument or an environment variable.
         post_status=0
         reply="$(printf '%s' "$body" | curl --silent --show-error --max-time 10 \
           --header 'Content-Type: application/json; charset=utf-8' \
-          --header @<(printf 'Authorization: Bearer %s\n' "$token") \
+          --header @<(printf 'Authorization: Bearer %s\n' "$alert_token") \
           --data-binary @- \
           https://slack.com/api/chat.postMessage)" || post_status=$?
 
         if [ "$post_status" -ne 0 ]; then
-          printf '::warning title=Ordered image alias alert not sent::The Slack request failed with curl exit status %s\n' "$post_status"
-        elif [ "$(jq -r '.ok == true' <<<"$reply" 2>/dev/null)" = true ]; then
-          printf '%s\n' 'Alert sent to Slack'
-        else
-          slack_error="$(jq -r '.error // empty' <<<"$reply" 2>/dev/null)" || slack_error=""
-          if ! [[ "$slack_error" =~ ^[a-z0-9_]+$ ]]; then
-            slack_error="no recognizable error code"
-          fi
-          printf '::warning title=Ordered image alias alert not sent::Slack did not accept the alert: %s\n' "$slack_error"
+          alert_not_sent "The Slack request failed with curl exit status $post_status"
         fi
-        exit 1
+        # Sent only when the reply is exactly one JSON object whose ok is the boolean true.
+        if jq -n -e '[inputs] | length == 1 and (.[0] | type == "object" and .ok == true)' <<<"$reply" >/dev/null 2>&1; then
+          printf '%s\n' 'Alert sent to Slack'
+          exit 1
+        fi
+        slack_error="$(jq -r '.error // empty' <<<"$reply" 2>/dev/null)" || slack_error=""
+        if ! [[ "$slack_error" =~ ^[a-z0-9_]+$ ]]; then
+          slack_error="no recognizable error code"
+        fi
+        alert_not_sent "Slack did not accept the alert: $slack_error"
