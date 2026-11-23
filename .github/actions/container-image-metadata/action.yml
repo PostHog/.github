@@ -1,0 +1,512 @@
+name: "container image metadata"
+description: >-
+  Tags, labels and OCI provenance annotations for a service container build --
+  the deploy-pipeline contract consumed by Kargo. Wraps
+  docker/metadata-action so every service stamps identical provenance: the
+  standard org.opencontainers.image.* set plus commit author, committer,
+  subject and committer timestamp, emitted as INDEX-LEVEL OCI annotations.
+  Index-level matters: Kargo's freight discovery reads only OCI annotations
+  (image config labels are invisible to it), and without a platform constraint
+  it surfaces only the index level. Kargo warehouses additionally key their
+  commit-order freight gate on org.opencontainers.image.revision, so the
+  annotation set here is a contract -- do not rename keys without checking the
+  warehouse criteria expressions and deploy_info consumers in the deployment repository.
+  Run after actions/checkout (commit metadata falls back to git when the
+  triggering event carries no head_commit). Feed all three outputs to
+  docker/build-push-action: tags, labels, and annotations. Ordered release
+  generation and publication require a `timeout` that supports --kill-after,
+  as GNU coreutils and uutils coreutils on Ubuntu GitHub-hosted runners do.
+
+inputs:
+  images:
+    required: true
+    description: >-
+      In the metadata phase, image repositories passed through unchanged to
+      docker/metadata-action. In the publication phase, exactly one image
+      repository (registry/name) is required, e.g.
+      registry.example.com/my-service; missing,
+      malformed, or multi-image values fail input validation.
+  extra-tags:
+    required: false
+    description: >-
+      Additional docker/metadata-action tag specs, one per line, APPENDED to
+      the fixed contract tag (an immutable sha-<gitsha> tag — what Kargo
+      image warehouses subscribe to). Deliberately additive rather than a
+      replaceable tags input: a full-replace override would let a consumer
+      silently drop the load-bearing sha- tag. No latest tag by default —
+      re-pushing it fails on immutable ECR repos and nothing in the deploy
+      pipeline reads it; consumers that want one pass
+      "type=raw,value=latest,enable={{is_default_branch}}" here.
+    default: ""
+  generate-ordered-release-tag:
+    required: false
+    description: >-
+      Compute the source-ordered release tag for an eligible default-branch
+      build without adding it to the standard metadata tags. Generation is
+      ignored when publish-ordered-release-tag is 'true'; the phases use
+      separate action invocations. Generation runs only for push and manual
+      dispatch events on the default branch. All other events and refs,
+      including schedules, are excluded by an explicit step condition and
+      produce no ordered-release annotation; failures within the allowed set
+      remain fail-soft warnings. On a shallow checkout, the bounded
+      --filter=tree:0 unshallow fetch registers origin as a promisor remote and
+      marks the checkout as a partial clone. That mutation is ephemeral on
+      GitHub-hosted runners but persists in self-hosted or reused checkouts.
+    default: "false"
+  publish-ordered-release-tag:
+    required: false
+    description: >-
+      Run the bounded post-build publication and registry read-back phase.
+      Invoke the action again after the required image build with this enabled;
+      publication takes precedence when generation is also enabled because the
+      phases use separate action invocations. Publication runs only for push
+      and manual dispatch events on the default branch. All other events and
+      refs, including schedules, are excluded by an explicit step condition
+      and produce no ordered-release annotation; active publication retains
+      its result annotations. The cross-invocation latency budget is at most
+      355 seconds: 120 seconds for history fetch, 35 seconds for publication,
+      and 20 seconds for each of up to six read-backs, plus a 10-second kill
+      grace per command.
+    default: "false"
+  ordered-release-tag:
+    required: false
+    description: >-
+      Source-ordered release tag returned by the pre-build invocation.
+    default: ""
+  ordered-release-digest:
+    required: false
+    description: >-
+      Exact sha256 digest returned by the required image build. Index and
+      single-manifest sources are both supported and retain this digest.
+    default: ""
+
+outputs:
+  tags:
+    description: "Image tags, for docker/build-push-action `tags`."
+    value: ${{ steps.meta.outputs.tags }}
+  labels:
+    description: "OCI labels, for docker/build-push-action `labels`."
+    value: ${{ steps.meta.outputs.labels }}
+  annotations:
+    description: >-
+      Index-level OCI annotations (provenance contract), for
+      docker/build-push-action `annotations`.
+    value: ${{ steps.meta.outputs.annotations }}
+  commit-subject:
+    description: >-
+      First line of the commit message, hard-capped at 160 chars (also
+      annotated on the image).
+    value: ${{ steps.commit.outputs.subject }}
+  commit-timestamp:
+    description: "Committer timestamp, ISO 8601 UTC (also annotated on the image)."
+    value: ${{ steps.commit.outputs.iso }}
+  commit-author:
+    description: "Commit author (GitHub login on push events, git author name otherwise; also annotated on the image)."
+    value: ${{ steps.commit.outputs.author }}
+  commit-committer:
+    description: "Committer (GitHub login on push events, git committer name otherwise; also annotated on the image)."
+    value: ${{ steps.commit.outputs.committer }}
+  ordered-release-tag:
+    description: >-
+      Source-ordered release tag, or empty when generation is disabled or
+      unavailable.
+    value: ${{ steps.ordered-release.outputs.tag }}
+  ordered-release-result:
+    description: >-
+      Post-build reconciliation result, or empty when the ordered publication
+      phase did not run.
+    value: ${{ steps.ordered-release-publication.outputs.result }}
+
+runs:
+  using: "composite"
+  steps:
+    # Commit metadata with fallbacks: push events carry head_commit (whose
+    # author/committer usernames are GitHub logins, matching what
+    # deploy_info historically records); other triggers fall back to git
+    # name fields. The message can be multiline and annotations are one per
+    # line, so only the subject line rides on the image — and the subject is
+    # additionally HARD-CAPPED at 160 chars. Nothing bounds a single line
+    # (PR titles alone reach 256 chars), and an unbounded value would flow
+    # into every downstream consumer: the freight annotations, the
+    # deployments-file deploy_info, promotion commit messages and
+    # notifications. The legacy repository_dispatch path has already been
+    # bitten by oversized commit messages (client_payload caps at 64KB);
+    # this contract bounds the value at the source instead. The committer
+    # timestamp is forced to UTC so consumers never parse mixed offsets.
+    - name: Extract commit metadata
+      id: commit
+      shell: bash
+      env:
+        COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        EVENT_AUTHOR: ${{ github.event.head_commit.author.username }}
+        EVENT_COMMITTER: ${{ github.event.head_commit.committer.username }}
+        # ${subject:0:157} and ${#subject} slice BYTES under a POSIX/C
+        # locale, which can cut a multibyte character in half and stamp
+        # invalid UTF-8 into the annotation. Pin the locale so slicing is
+        # character-based regardless of the runner image's defaults.
+        LC_ALL: C.UTF-8
+      run: |
+        # The three values below go to GITHUB_OUTPUT and into the
+        # metadata-action annotations input, whose parser can take a
+        # carriage return as a line break, opens a quoted field at a double
+        # quote that directly follows a comma, and compiles each entry as a
+        # Handlebars template. sanitize() keeps a value from starting
+        # another output key or annotation by replacing every ASCII control
+        # character (0x01-0x1F and DEL; an explicit range, because
+        # [[:cntrl:]] under C.UTF-8 differs between platforms) with a space,
+        # keeps it from being read as a template by breaking every "{{" into
+        # "{ {", and keeps it from opening a quoted field by turning ',"'
+        # into ', "'. It runs before the length cut, and a cut prefix plus
+        # "..." cannot form a new "{{" or ',"'.
+        sanitize() {
+          local value="${1//[$'\001'-$'\037'$'\177']/ }"
+          local open='{{' broken='{ {'
+          local comma_quote=',"' spaced=', "'
+          while [[ "${value}" == *"${open}"* ]]; do
+            value="${value//"${open}"/"${broken}"}"
+          done
+          value="${value//"${comma_quote}"/"${spaced}"}"
+          printf '%s' "${value}"
+        }
+        # No pipeline here: with printf | head, head exits after the first line
+        # and printf, still writing a large remainder, fails with SIGPIPE.
+        subject="${COMMIT_MESSAGE%%$'\n'*}"
+        if [ -z "${subject}" ]; then
+          subject="$(git log -1 --format=%s)"
+        fi
+        author="${EVENT_AUTHOR:-$(git log -1 --format=%an)}"
+        committer="${EVENT_COMMITTER:-$(git log -1 --format=%cn)}"
+        subject="$(sanitize "${subject}")"
+        author="$(sanitize "${author}")"
+        committer="$(sanitize "${committer}")"
+        if [ "${#subject}" -gt 160 ]; then
+          subject="${subject:0:157}..."
+        fi
+        {
+          echo "subject=${subject}"
+          echo "author=${author}"
+          echo "committer=${committer}"
+          echo "iso=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Compute ordered release tag
+      id: ordered-release
+      if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && inputs.publish-ordered-release-tag != 'true' && inputs.generate-ordered-release-tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      continue-on-error: true
+      shell: bash
+      env:
+        ORDERED_RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+
+        skip_ordered_release_tag() {
+          printf '::warning::Skipping ordered release tag because %s\n' "$1"
+          printf 'tag=\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
+        # The step condition compares the ref ignoring letter case; Git refs do not.
+        if [ -z "${ORDERED_RELEASE_DEFAULT_BRANCH:-}" ]; then
+          skip_ordered_release_tag "the default branch is unknown"
+        fi
+        if [ "${GITHUB_REF:-}" != "refs/heads/${ORDERED_RELEASE_DEFAULT_BRANCH}" ]; then
+          skip_ordered_release_tag "the ref is not exactly the default branch"
+        fi
+
+        # Test the behavior that the bounds need, not the version text.
+        # Ubuntu 26.04 runners ship uutils coreutils, and GNU and uutils timeout behave the same here.
+        timeout_is_usable() {
+          local status=0
+          command -v timeout >/dev/null 2>&1 || return 1
+          timeout --kill-after=1s 0.1s sleep 5 || status=$?
+          [ "$status" -eq 124 ] || return 1
+          status=0
+          # The subshell keeps the shell notice for the killed process out of the log.
+          (timeout --kill-after=0.2s 0.1s bash -c 'trap "" TERM; while :; do :; done'; exit $?) 2>/dev/null || status=$?
+          [ "$status" -eq 137 ]
+        }
+
+        if ! shallow="$(git rev-parse --is-shallow-repository 2>/dev/null)"; then
+          skip_ordered_release_tag "repository history could not be inspected"
+        fi
+
+        if [ "$shallow" = "true" ]; then
+          if ! timeout_is_usable; then
+            skip_ordered_release_tag "the timeout prerequisite is unavailable"
+          fi
+          if ! timeout --kill-after=10s 120s git fetch \
+            --no-tags \
+            --prune \
+            --no-recurse-submodules \
+            --unshallow \
+            --filter=tree:0 \
+            origin \
+            "+${GITHUB_REF}:refs/remotes/origin/${GITHUB_REF_NAME}"; then
+            skip_ordered_release_tag "complete source history could not be fetched"
+          fi
+        fi
+
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" != "false" ]; then
+          skip_ordered_release_tag "complete source history is unavailable"
+        fi
+
+        if ! head_revision="$(git rev-parse HEAD 2>/dev/null)" || [ "$head_revision" != "$GITHUB_SHA" ]; then
+          skip_ordered_release_tag "the checked-out revision does not match GITHUB_SHA"
+        fi
+
+        if ! position="$(git rev-list --first-parent --count "$GITHUB_SHA" 2>/dev/null)"; then
+          skip_ordered_release_tag "the source position could not be computed"
+        fi
+
+        case "$position" in
+          ""|0|0*|*[!0-9]*)
+            skip_ordered_release_tag "the source position is outside the supported range"
+            ;;
+        esac
+
+        if [ "${#position}" -gt 12 ] || ! [[ "$GITHUB_SHA" =~ ^[0-9a-f]{6,}$ ]]; then
+          skip_ordered_release_tag "the source position is outside the supported range"
+        fi
+
+        if ! printf -v tag 'r%012d-%.6s' "$position" "$GITHUB_SHA" ||
+          ! [[ "$tag" =~ ^r[0-9]{12}-[0-9a-f]{6}$ ]]; then
+          skip_ordered_release_tag "the source position is outside the supported range"
+        fi
+
+        printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+    # DOCKER_METADATA_ANNOTATIONS_LEVELS=index is load-bearing, not a
+    # preference: without it metadata-action emits labels only, which Kargo
+    # cannot see; and index is the only level Kargo surfaces for a
+    # multi-arch image without a platform constraint. Index-level
+    # annotations also require the pushed artifact to be an OCI image index
+    # -- multi-platform builds with buildkit's default provenance
+    # attestations already produce one.
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+      env:
+        DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+      with:
+        images: ${{ inputs.images }}
+        # Fixed contract tag first; extra-tags are appended, never replace
+        # (metadata-action ignores blank lines when extra-tags is empty).
+        # The sha- prefix is part of the contract: Kargo warehouses filter
+        # on ^sha-, and a prefixed tag stays self-describing next to pr-*,
+        # semver, and branch tags in the same repo.
+        tags: |
+          type=sha,prefix=sha-,format=long
+          ${{ inputs.extra-tags }}
+        annotations: |
+          com.posthog.image.author=${{ steps.commit.outputs.author }}
+          com.posthog.image.committer=${{ steps.commit.outputs.committer }}
+          com.posthog.image.message=${{ steps.commit.outputs.subject }}
+          com.posthog.image.commit-timestamp=${{ steps.commit.outputs.iso }}
+
+    - name: Validate ordered release publication inputs
+      id: ordered-release-validation
+      if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && inputs.publish-ordered-release-tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      shell: bash
+      env:
+        ORDERED_RELEASE_IMAGE: ${{ inputs.images }}
+        ORDERED_RELEASE_TAG: ${{ inputs.ordered-release-tag }}
+        ORDERED_RELEASE_DIGEST: ${{ inputs.ordered-release-digest }}
+        ORDERED_RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+
+        fail_input() {
+          printf '::error title=Invalid ordered image alias input::%s\n' "$1" >&2
+          exit 2
+        }
+
+        skip_publication() {
+          printf '::warning::Skipping ordered image alias publication because %s\n' "$1"
+          printf 'skip=true\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
+        # The step condition compares the ref ignoring letter case; Git refs do not.
+        # skip=true also keeps the publication step from running.
+        if [ -z "${ORDERED_RELEASE_DEFAULT_BRANCH:-}" ]; then
+          skip_publication "the default branch is unknown"
+        fi
+        if [ "${GITHUB_REF:-}" != "refs/heads/${ORDERED_RELEASE_DEFAULT_BRANCH}" ]; then
+          skip_publication "the ref is not exactly the default branch"
+        fi
+
+        repository="${ORDERED_RELEASE_IMAGE:-}"
+        ordered_tag="${ORDERED_RELEASE_TAG:-}"
+        expected_digest="${ORDERED_RELEASE_DIGEST:-}"
+        source_revision="${GITHUB_SHA:-}"
+
+        if [ -z "$ordered_tag" ]; then
+          printf '%s\n' '::notice::Skipping ordered image alias publication because no ordered tag was generated'
+          printf 'skip=true\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        while [[ "$repository" == [[:space:]]* ]]; do
+          repository="${repository:1}"
+        done
+        while [[ "$repository" == *[[:space:]] ]]; do
+          repository="${repository:0:${#repository}-1}"
+        done
+
+        case "$repository" in
+          ""|-*|*[[:space:]@,]*)
+            fail_input "The publication phase requires exactly one image repository without whitespace, a digest, or a list separator"
+            ;;
+        esac
+
+        registry="${repository%%/*}"
+        repository_name="${repository#*/}"
+        if [ "$registry" = "$repository" ]; then
+          fail_input "The publication phase requires an image repository in registry/name form"
+        fi
+        case "$registry" in
+          ""|-*|*[[:space:]@,]*)
+            fail_input "The publication phase requires exactly one untagged image repository in registry/name form"
+            ;;
+        esac
+        case "$repository_name" in
+          ""|-*|*[[:space:]@,]*|*:*)
+            fail_input "The publication phase requires exactly one untagged image repository in registry/name form"
+            ;;
+        esac
+        if ! [[ "$registry" =~ ^[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]] ||
+          ! [[ "$repository_name" =~ ^[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*$ ]]; then
+          fail_input "The publication phase image repository is malformed"
+        fi
+
+        if ! [[ "$ordered_tag" =~ ^r[0-9]{12}-[0-9a-f]{6}$ ]] ||
+          ! [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+          ! [[ "$source_revision" =~ ^[0-9a-f]{6,}$ ]] ||
+          [ "${ordered_tag##*-}" != "${source_revision:0:6}" ]; then
+          fail_input "The ordered tag, digest, and source revision must be present, valid, and revision-matched"
+        fi
+
+        printf 'image=%s\n' "$repository" >> "$GITHUB_OUTPUT"
+
+    - name: Publish and reconcile ordered release tag
+      id: ordered-release-publication
+      if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && inputs.publish-ordered-release-tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && steps.ordered-release-validation.outputs.skip != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        ORDERED_RELEASE_IMAGE: ${{ steps.ordered-release-validation.outputs.image }}
+        ORDERED_RELEASE_TAG: ${{ inputs.ordered-release-tag }}
+        ORDERED_RELEASE_DIGEST: ${{ inputs.ordered-release-digest }}
+      run: |
+        set -euo pipefail
+
+        # Test the behavior that the bounds need, not the version text.
+        # Ubuntu 26.04 runners ship uutils coreutils, and GNU and uutils timeout behave the same here.
+        timeout_is_usable() {
+          local status=0
+          command -v timeout >/dev/null 2>&1 || return 1
+          timeout --kill-after=1s 0.1s sleep 5 || status=$?
+          [ "$status" -eq 124 ] || return 1
+          status=0
+          # The subshell keeps the shell notice for the killed process out of the log.
+          (timeout --kill-after=0.2s 0.1s bash -c 'trap "" TERM; while :; do :; done'; exit $?) 2>/dev/null || status=$?
+          [ "$status" -eq 137 ]
+        }
+
+        if ! timeout_is_usable; then
+          printf '%s\n' '::error title=Ordered image alias read-back unavailable::A timeout with --kill-after is required for bounded ordered image alias publication and read-back' >&2
+          printf 'result=unknown\n' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Keep the 20s read-back and 35s publication bounds in sync with the publish-ordered-release-tag latency budget above.
+        inspect_digest() {
+          local reference="$1"
+          local output
+          local status=0
+
+          output="$(timeout --kill-after=10s 20s \
+            docker buildx imagetools inspect \
+            --format '{{json .Manifest.Digest}}' "$reference" 2>/dev/null)" || status=$?
+
+          if [ "$status" -ne 0 ]; then
+            return "$status"
+          fi
+
+          if [[ "$output" =~ ^\"(sha256:[0-9a-f]{64})\"$ ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+          fi
+
+          return 65
+        }
+
+        classify_alias() {
+          local target="$1"
+          local source="$2"
+          local expected="$3"
+          local observed
+
+          if observed="$(inspect_digest "$target")" || observed="$(inspect_digest "$target")"; then
+            if [ "$observed" = "$expected" ]; then
+              printf '%s\n' present-at-expected-digest
+            else
+              printf '%s\n' integrity-mismatch
+            fi
+          elif inspect_digest "$source" >/dev/null; then
+            printf '%s\n' absent
+          else
+            printf '%s\n' unknown
+          fi
+        }
+
+        repository="$ORDERED_RELEASE_IMAGE"
+        ordered_tag="$ORDERED_RELEASE_TAG"
+        expected_digest="$ORDERED_RELEASE_DIGEST"
+        target_image="${repository}:${ordered_tag}"
+        source_image="${repository}@${expected_digest}"
+        publication_status=0
+        candidate=""
+        observed=""
+        if observed="$(inspect_digest "$target_image")"; then
+          if [ "$observed" = "$expected_digest" ]; then
+            candidate=present-at-expected-digest
+          else
+            candidate=integrity-mismatch
+          fi
+        elif ! inspect_digest "$source_image" >/dev/null && observed="$(inspect_digest "$target_image")"; then
+          if [ "$observed" = "$expected_digest" ]; then
+            candidate=present-at-expected-digest
+          else
+            candidate=integrity-mismatch
+          fi
+        fi
+        if [ -z "$candidate" ]; then
+          timeout --kill-after=10s 35s \
+            docker buildx imagetools create --prefer-index=false --tag "$target_image" "$source_image" >&2 || publication_status=$?
+          candidate="$(classify_alias "$target_image" "$source_image" "$expected_digest")" || candidate=unknown
+        fi
+
+        case "$candidate" in
+          present-at-expected-digest)
+            if [ "$publication_status" -eq 0 ]; then
+              printf '%s\n' '::notice title=Ordered image alias present::Registry read-back confirmed the expected build digest' >&2
+            else
+              printf '::notice title=Ordered image alias present::Registry read-back confirmed the expected build digest after publication client status %s\n' "$publication_status" >&2
+            fi
+            ;;
+          absent)
+            printf '::warning title=Ordered image alias absent::Registry read-back confirmed absence after publication client status %s\n' "$publication_status" >&2
+            ;;
+          integrity-mismatch)
+            printf '%s\n' '::error title=Ordered image alias integrity mismatch::Registry read-back returned a different digest' >&2
+            ;;
+          unknown)
+            printf '%s\n' '::error title=Ordered image alias read-back unavailable::Registry read-back could not determine the ordered alias state' >&2
+            ;;
+          *)
+            candidate=unknown
+            printf '%s\n' '::error title=Ordered image alias read-back unavailable::Registry read-back could not determine the ordered alias state' >&2
+            ;;
+        esac
+        printf 'result=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
