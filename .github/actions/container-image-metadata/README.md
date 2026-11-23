@@ -56,19 +56,23 @@ An attempt starts with a probe: it reads the alias up to twice and, only when ne
 
 When the first attempt ends `absent` or `unknown`, the phase waits five seconds and makes a second attempt, which probes again before it writes. The second attempt's result is the phase's result, and the log names the attempt that gave it. When the phase ends without a confirmed alias, the log also carries the registry client's output and exit status from the last failed read and the last write, inside a block that cannot issue workflow commands. A read whose client exited 0 with output that is not a digest is labelled an output-format failure. An exit status of 124 or 137 means the time limit stopped the client.
 
-The `ordered-release-result` output of the publish invocation (`steps.alias.outputs.ordered-release-result` in the example) is empty in four cases:
+Two things are visible to a caller: the `ordered-release-result` output of the publish invocation (`steps.alias.outputs.ordered-release-result` in the example), and the result the last step reports in its annotation and alert. They differ when the output is empty. The output is set only by the publication script, and it is empty in four cases:
 - Outside the event and ref gate, nothing runs and nothing fails.
-- When validation skips publication (no ordered tag, or a failed check), the last step fails with `tag-unavailable` or the reason.
-- When the publication script fails before it sets the output, the last step treats the result as `unknown` and fails.
-- When an earlier step of the publish invocation fails or the job is cancelled, neither publication nor the last step runs and no alert is sent.
+- When validation skips publication (no ordered tag, or a failed check), the last step reports `tag-unavailable` or the reason and fails.
+- When the publication script fails before it sets the output, the last step reports `unknown` and fails. A caller that branches on the output cannot tell this case from a validation skip by the output alone; the last step's annotation names the result it reported.
+- When an earlier step of the publish invocation fails, publication and the last step do not run and no alert is sent. When the job is cancelled before or during publication, the last step does not run and no alert is sent; a cancellation during publication may leave the alias written.
 
-| `ordered-release-result` | What the publish phase did | Last step | Message |
-|---|---|---|---|
-| `present-at-expected-digest` | Found the alias at the built digest, already there or written and read back. | Passes. | None. |
-| `absent` | In the last attempt, the read-back after the write could not read the alias while the built digest could be read. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-running the failed job retries. |
-| `unknown` | In the last attempt, the probe or the read-back after a write could read neither the alias nor the built digest; or no `timeout` with `--kill-after` was found; or the publication script failed before setting the output (empty output). | Fails. | The alias could not be verified at the expected digest, so whether Kargo creates Freight for this build is uncertain. Re-running the failed job retries. |
-| `integrity-mismatch` | Found the alias at another digest in a probe or a read-back and ended the phase with no further write. | Fails. | The same consequence as `unknown`. A re-run cannot clear it. |
-| empty | Skipped publication: no ordered tag (`tag-unavailable`) or failed validation. | Fails with `tag-unavailable` or the reason. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-run all jobs: the failed job alone reuses the build's empty value. |
+A cancellation also stops the last step whatever the output already holds, so an output set before the cancellation comes with no annotation from the last step and no message. A cancellation does not undo what already happened: an alias that publication wrote stays written, and a post the last step already started may still reach Slack.
+
+| `ordered-release-result` output | Result the last step reports | What the publish phase did | Last step | Message |
+|---|---|---|---|---|
+| `present-at-expected-digest` | `present-at-expected-digest` | Found the alias at the built digest, already there or written and read back. | Passes. | None. |
+| `absent` | `absent` | In the last attempt, the read-back after the write could not read the alias while the built digest could be read. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-running the failed job retries. |
+| `unknown` | `unknown` | In the last attempt, the probe or the read-back after a write could read neither the alias nor the built digest; or no `timeout` with `--kill-after` was found. | Fails. | The alias could not be verified at the expected digest, so whether Kargo creates Freight for this build is uncertain. Re-running the failed job retries. |
+| `integrity-mismatch` | `integrity-mismatch` | Found the alias at another digest in a probe or a read-back and ended the phase with no further write. | Fails. | The same consequence as `unknown`. A re-run cannot clear it. |
+| empty | `tag-unavailable` or the validation reason | Validation skipped publication; nothing was written. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-run all jobs: the failed job alone reuses the build's empty value. |
+| empty | `unknown` | The publication script failed before setting the output; it may have written before it failed. | Fails. | The same as `unknown` above. |
+| empty | None: the last step does not run. | Outside the gate nothing ran; after an earlier failed step publication did not run; after a cancellation before or during publication, publication may have written the alias. | Does not run. | None. |
 
 ### Alert
 
@@ -91,6 +95,7 @@ The figures below are totals of the timed operations, not a limit on the phase. 
 ### What a caller must do
 
 - Pass `alert-slack-bot-token` to the publish invocation, from a secret, to get the Slack alert. It is optional: without it the phase still fails and writes its error annotation, with no Slack message, for callers that alert another way.
+- Call the publish phase once per job. A failed call fails its job, and under the default step condition that skips every later step of the job, so a second publish call in the same job would never run when the first fails: its alias would not be written and no message would name its image repository. Do not put two publish calls in one job. For several image repositories, use one job per repository or a matrix over `images`; each call that reaches its last step and fails then sends its own message, when a token is passed, naming its own image repository.
 - Where other jobs depend on the job that publishes the alias, put the publish invocation in its own job with `continue-on-error: true` at job level, so a missing alias fails that job without blocking its dependents. A step-level `continue-on-error` reports the step as succeeded and hides the failure, so it is not the way. Take `tags`, `labels` and `annotations` from the first invocation.
 
 ```yaml

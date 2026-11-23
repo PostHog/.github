@@ -465,9 +465,11 @@ runs:
           fi
 
           mv "$client_output/read" "$client_output/failed-read"
+          if [ -n "$output" ]; then
+            printf 'Client output:\n%s\n' "$output" >> "$client_output/failed-read"
+          fi
           if [ "$status" -eq 0 ]; then
             printf 'output format failure, client exit status 0' > "$client_output/failed-read-status"
-            printf 'Client output:\n%s\n' "$output" >> "$client_output/failed-read"
             return 65
           fi
           printf 'exit status %s' "$status" > "$client_output/failed-read-status"
@@ -626,8 +628,9 @@ runs:
         fi
 
         # The token reaches curl as a header file on a pipe, never as an argument or an environment variable.
+        # -q, which curl honours only as the first argument, keeps a .curlrc from changing the request.
         post_status=0
-        reply="$(printf '%s' "$body" | curl --silent --show-error --max-time 10 \
+        reply="$(printf '%s' "$body" | curl -q --silent --show-error --max-time 10 \
           --header 'Content-Type: application/json; charset=utf-8' \
           --header @<(printf 'Authorization: Bearer %s\n' "$alert_token") \
           --data-binary @- \
