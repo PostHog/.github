@@ -103,7 +103,7 @@ env:
   IMAGE_REPOSITORY: registry.example.com/my-service
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -129,7 +129,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
   ordered-release-alias:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: build
     continue-on-error: true
     timeout-minutes: 15
