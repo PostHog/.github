@@ -31,7 +31,7 @@ steps:
 
 ## Ordered release alias
 
-Ordered release aliases require two invocations of the action. The first invocation computes the ordered tag before the image build (the generate phase). The second invocation, with `publish-ordered-release-tag: "true"`, writes that tag as an alias of the built digest and reads it back from the registry (the publish phase).
+Ordered release aliases require two invocations of the action. The first invocation computes the ordered tag (the generate phase). The second invocation, with `publish-ordered-release-tag: "true"`, writes that tag as an alias of the built digest and reads it back from the registry (the publish phase).
 
 Ordered tag generation and publication need:
 
@@ -42,13 +42,13 @@ Ordered tag generation and publication need:
 
 ### What fails and what only warns
 
-The generate phase never fails for the ordered tag, so the build it runs in finishes. When no tag can be made, it writes the warning `Skipping ordered release tag because <reason>` and leaves `ordered-release-tag` empty. On a shallow checkout it fetches the history treeless (`--filter=tree:0`). When that fetch fails, it writes a warning, removes the `remote.origin.promisor` and `remote.origin.partialclonefilter` settings the failed fetch left, and fetches the full history once without the filter. The tag is skipped only when that fetch fails too.
+The generate phase never fails for the ordered tag, so the publish call after it runs. When no tag can be made, it writes the warning `Skipping ordered release tag because <reason>` and leaves `ordered-release-tag` empty. On a shallow checkout it fetches the history treeless (`--filter=tree:0`). When that fetch fails, it writes a warning, removes the `remote.origin.promisor` and `remote.origin.partialclonefilter` settings the failed fetch left, and fetches the full history once without the filter. The tag is skipped only when that fetch fails too.
 
 The publish phase fails unless the registry read-back finds the alias at the built digest. Its last step, `Check ordered release alias`, is the only step of the phase that fails. It writes the notice `Ordered image alias present` when the alias is confirmed, and otherwise the error `Ordered image alias not confirmed` with the result or reason, then fails. Every run of that step logs whether an alert token was supplied. When the runner's `timeout` lacks `--kill-after`, publication writes the error `Ordered image alias read-back unavailable` and the result is `unknown`.
 
 Publish inputs are validated before anything is written. When validation fails, the phase writes the warning `Skipping ordered image alias publication because <reason>`, writes nothing to the registry, and the last step fails with that reason. Validation fails for a ref that is not exactly the default branch, an `images` value that is not exactly one repository in registry/name form, a malformed tag, a missing or malformed digest, or a tag whose six-character suffix is not the start of `GITHUB_SHA`. The action does not read the commit from the image: it compares the suffix with the `GITHUB_SHA` of the publishing run, so publish in the same workflow run as the build. An empty ordered tag skips publication the same way and is reported as `tag-unavailable`.
 
-The commit metadata and `Docker meta` steps run in both invocations and fail their step on error. When one of them fails, the job is already failed and the last step does not run, so no alert is sent. Nothing runs after a cancelled step either.
+The commit metadata and `Docker meta` steps run in every invocation and fail their step on error. When one of them fails, the job is already failed and the last step does not run, so no alert is sent. Nothing runs after a cancelled step either.
 
 ### Attempts
 
@@ -70,9 +70,11 @@ A cancellation keeps a last step that has not started from starting, whatever th
 | `absent` | `absent` | In the last attempt, the read-back after the write could not read the alias while the built digest could be read. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-running the failed job retries. |
 | `unknown` | `unknown` | In the last attempt, the probe or the read-back after a write could read neither the alias nor the built digest; or no `timeout` with `--kill-after` was found. | Fails. | The alias could not be verified at the expected digest, so whether Kargo creates Freight for this build is uncertain. Re-running the failed job retries. |
 | `integrity-mismatch` | `integrity-mismatch` | Found the alias at another digest in a probe or a read-back and ended the phase with no further write. | Fails. | The same consequence as `unknown`. A re-run cannot clear it. |
-| empty | `tag-unavailable` or the validation reason | Validation skipped publication; nothing was written. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-run all jobs: the failed job alone reuses the build's empty value. |
+| empty | `tag-unavailable` or the validation reason | Validation skipped publication; nothing was written. | Fails. | Kargo creates no Freight for this build, so deploys stay on the previous build. Re-running the failed job retries. |
 | empty | `unknown` | The publication script failed before setting the output; it may have written before it failed. | Fails. | The same as `unknown` above. |
 | empty | None: the last step does not run. | Outside the gate, validation, publication and the last step did not run; after an earlier failed step, publication did not run; after a cancellation before or during publication, publication may have written the alias. | Does not run. | None. |
+
+The retry sentence is true because the publish phase runs in a job of its own (see [What a caller must do](#what-a-caller-must-do)): the failed job is the alias job, which generates the tag again and builds nothing. A validation failure that a re-run repeats, such as a malformed input or a ref that is not the default branch, is told apart by its reason, which the message names.
 
 ### Alert
 
@@ -87,7 +89,7 @@ None of these changes the outcome: the step still fails for the alias. Without a
 
 ### Time budget
 
-The figures below are totals of the timed operations, not a limit on the phase. The action has no phase timer, and other commands add a little. Set each job's `timeout-minutes` above them.
+The figures below are totals of the timed operations, not a limit on the phase. The action has no phase timer, and other commands add a little. The alias job sets `timeout-minutes` to about twice the two budgets together, which is 30 minutes for today's 905 seconds (440 + 465). A limit below the budgets can end the job before the step that alerts. With no limit, a job that hangs in the checkout or the registry login holds its runner for GitHub's six-hour default, and where a concurrency group queues the next run behind it, it delays the next build as well.
 
 - Generate phase: the history fetches total at most 440 seconds, 120 seconds for the treeless fetch and 300 for the full fetch that follows when it fails, each with a 10-second kill grace (130 + 310).
 - Publish phase: the registry operations and the alert total at most 465 seconds. An attempt makes up to six 20-second registry reads and one 35-second write, each with a 10-second kill grace (6 × 30 + 45 = 225 seconds). Two attempts, the 5-second pause between them and the alert's 10 seconds make 2 × 225 + 5 + 10.
@@ -96,7 +98,11 @@ The figures below are totals of the timed operations, not a limit on the phase. 
 
 - Pass `alert-slack-bot-token` to the publish invocation, from a secret, to get the Slack alert. It is optional: without it the phase still fails and writes its error annotation, with no Slack message, for callers that alert another way.
 - Call the publish phase once per job. A failed call fails its job, and under the default step condition that skips every later step of the job, so a second publish call in the same job would never run when the first fails: its alias would not be written and no message would name its image repository. Do not put two publish calls in one job. For several image repositories, use one job per repository or a matrix over `images`; each call that reaches its last step and fails then sends its own message, when a token is passed, naming its own image repository.
-- Where other jobs depend on the job that publishes the alias, put the publish invocation in its own job with `continue-on-error: true` at job level, so a missing alias fails that job without blocking its dependents. A step-level `continue-on-error` reports the step as succeeded and hides the failure, so it is not the way. Take `tags`, `labels` and `annotations` from the first invocation.
+- In every calling repository that publishes the alias, the publish phase runs in a job of its own, after the build. That job checks out the commit, logs in to the registry, calls the action to generate the ordered tag and calls it again to publish and check the alias. Only the digest crosses from the build job, as a job output. The image repository is named in the alias job itself. Re-running that job alone retries generation and publication and builds nothing. The reason is the registry: a re-run that builds the image again pushes another digest, and a registry that keeps its tags immutable refuses to push a tag that already exists, so the job that can be re-run must build nothing. That re-run can recover from a transient failure to generate the tag, publish the alias or verify it.
+- The two calls stay two. The action's phases are separate invocations, and an empty tag passed to the publish phase keeps its meaning, `tag-unavailable`.
+- The build job calls the action once for `tags`, `labels` and `annotations` and does not ask for the ordered tag: the action adds it to no metadata tag and writes it into no annotation.
+- Nothing depends on the alias job, so the jobs that depend on the build run whatever it does. Do not mark the alias job or its steps `continue-on-error`. A failed alias job then fails the run, also when it fails before the action's last step, where no message is sent. A step-level `continue-on-error` reports the step as succeeded and hides the failure. The one exception is a workflow in which something else reads the alias job's result and alerts on it: there the job may be marked at job level, so that a missing alias does not fail the run.
+- The checkout may be shallow: the action fetches the history the tag needs. The alias job sets a generous time limit, as [Time budget](#time-budget) explains.
 
 ```yaml
 env:
@@ -109,17 +115,15 @@ jobs:
       contents: read
       # Add what your registry login needs, for example id-token: write or packages: write.
     outputs:
-      ordered-release-tag: ${{ steps.meta.outputs.ordered-release-tag }}
       digest: ${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@<sha>
       # Log in to the registry here.
-      - name: Image metadata and ordered release tag
+      - name: Image metadata
         id: meta
         uses: PostHog/.github/.github/actions/container-image-metadata@<sha>
         with:
           images: ${{ env.IMAGE_REPOSITORY }}
-          generate-ordered-release-tag: "true"
       - name: Build and push
         id: image
         uses: docker/build-push-action@<sha>
@@ -131,23 +135,26 @@ jobs:
   ordered-release-alias:
     runs-on: ubuntu-latest
     needs: build
-    continue-on-error: true
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
       # Add what your registry login needs, for example id-token: write or packages: write.
     steps:
       - uses: actions/checkout@<sha>
       # Log in to the registry here.
+      - name: Generate ordered release tag
+        id: ordered-tag
+        uses: PostHog/.github/.github/actions/container-image-metadata@<sha>
+        with:
+          images: ${{ env.IMAGE_REPOSITORY }}
+          generate-ordered-release-tag: "true"
       - name: Publish ordered release alias
         id: alias
         uses: PostHog/.github/.github/actions/container-image-metadata@<sha>
         with:
           images: ${{ env.IMAGE_REPOSITORY }}
           publish-ordered-release-tag: "true"
-          ordered-release-tag: ${{ needs.build.outputs.ordered-release-tag }}
+          ordered-release-tag: ${{ steps.ordered-tag.outputs.ordered-release-tag }}
           ordered-release-digest: ${{ needs.build.outputs.digest }}
           alert-slack-bot-token: ${{ secrets.ALERT_SLACK_BOT_TOKEN }}
 ```
-
-When nothing depends on the build job, the publish invocation can stay in it as a last step after `Build and push`, with the same inputs taken from `steps.meta` and `steps.image`.
