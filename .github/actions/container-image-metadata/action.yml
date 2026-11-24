@@ -63,10 +63,16 @@ inputs:
       and manual dispatch events on the default branch. All other events and
       refs, including schedules, are excluded by an explicit step condition
       and produce no ordered-release annotation; active publication retains
-      its result annotations. The cross-invocation latency budget is at most
-      355 seconds: 120 seconds for history fetch, 35 seconds for publication,
-      and 20 seconds for each of up to six read-backs, plus a 10-second kill
-      grace per command.
+      its result annotations. The bounded operations of both invocations
+      total at most 905 seconds; these are sums of the timed operations, not a
+      limit on either phase, so set each job's timeout-minutes above them.
+      Generation's bounded fetches total at most 440 seconds: 120 seconds for
+      the treeless history fetch and 300 seconds for the full fetch that
+      follows when it fails. Publication's bounded operations total at most
+      465 seconds: two attempts of up to six 20-second read-backs and one
+      35-second publication each, a 5-second pause between them, and 10
+      seconds for the alert. Each history fetch, read-back and publication
+      has a 10-second kill grace.
     default: "false"
   ordered-release-tag:
     required: false
@@ -79,6 +85,19 @@ inputs:
       Exact sha256 digest returned by the required image build. Index and
       single-manifest sources are both supported and retain this digest.
     default: ""
+  alert-slack-bot-token:
+    required: false
+    description: >-
+      Slack bot token for the publication phase. When the phase fails because
+      the ordered alias is not confirmed, the action attempts one post to
+      alert-slack-channel. Without a token the phase still fails, with no Slack
+      message.
+  alert-slack-channel:
+    required: false
+    description: >-
+      Slack channel ID for the publication phase alert. The bot must be a
+      member of the channel.
+    default: "C0B11J29GP9"
 
 outputs:
   tags:
@@ -230,19 +249,34 @@ runs:
           skip_ordered_release_tag "repository history could not be inspected"
         fi
 
-        if [ "$shallow" = "true" ]; then
-          if ! timeout_is_usable; then
-            skip_ordered_release_tag "the timeout prerequisite is unavailable"
-          fi
-          if ! timeout --kill-after=10s 120s git fetch \
+        fetch_history() {
+          local bound="$1"
+          shift
+          timeout --kill-after=10s "$bound" git fetch \
             --no-tags \
             --prune \
             --no-recurse-submodules \
             --unshallow \
-            --filter=tree:0 \
+            "$@" \
             origin \
-            "+${GITHUB_REF}:refs/remotes/origin/${GITHUB_REF_NAME}"; then
-            skip_ordered_release_tag "complete source history could not be fetched"
+            "+${GITHUB_REF}:refs/remotes/origin/${GITHUB_REF_NAME}"
+        }
+
+        if [ "$shallow" = "true" ]; then
+          if ! timeout_is_usable; then
+            skip_ordered_release_tag "the timeout prerequisite is unavailable"
+          fi
+          fetch_status=0
+          fetch_history 120s --filter=tree:0 || fetch_status=$?
+          if [ "$fetch_status" -ne 0 ]; then
+            printf '::warning::Treeless history fetch failed with status %s, retrying without --filter=tree:0\n' "$fetch_status"
+            git config --unset remote.origin.promisor || true
+            git config --unset remote.origin.partialclonefilter || true
+            fetch_status=0
+            fetch_history 300s || fetch_status=$?
+            if [ "$fetch_status" -ne 0 ]; then
+              skip_ordered_release_tag "complete source history could not be fetched (status $fetch_status)"
+            fi
           fi
         fi
 
@@ -315,19 +349,14 @@ runs:
       run: |
         set -euo pipefail
 
-        fail_input() {
-          printf '::error title=Invalid ordered image alias input::%s\n' "$1" >&2
-          exit 2
-        }
-
         skip_publication() {
           printf '::warning::Skipping ordered image alias publication because %s\n' "$1"
-          printf 'skip=true\n' >> "$GITHUB_OUTPUT"
+          printf 'skip=true\nreason=%s\n' "${2:-$1}" >> "$GITHUB_OUTPUT"
           exit 0
         }
 
         # The step condition compares the ref ignoring letter case; Git refs do not.
-        # skip=true also keeps the publication step from running.
+        # skip=true keeps the publication step from running, and the check step fails with the reason.
         if [ -z "${ORDERED_RELEASE_DEFAULT_BRANCH:-}" ]; then
           skip_publication "the default branch is unknown"
         fi
@@ -341,9 +370,7 @@ runs:
         source_revision="${GITHUB_SHA:-}"
 
         if [ -z "$ordered_tag" ]; then
-          printf '%s\n' '::notice::Skipping ordered image alias publication because no ordered tag was generated'
-          printf 'skip=true\n' >> "$GITHUB_OUTPUT"
-          exit 0
+          skip_publication "no ordered tag was generated" tag-unavailable
         fi
 
         while [[ "$repository" == [[:space:]]* ]]; do
@@ -355,35 +382,35 @@ runs:
 
         case "$repository" in
           ""|-*|*[[:space:]@,]*)
-            fail_input "The publication phase requires exactly one image repository without whitespace, a digest, or a list separator"
+            skip_publication "the publication phase requires exactly one image repository without whitespace, a digest, or a list separator"
             ;;
         esac
 
         registry="${repository%%/*}"
         repository_name="${repository#*/}"
         if [ "$registry" = "$repository" ]; then
-          fail_input "The publication phase requires an image repository in registry/name form"
+          skip_publication "the publication phase requires an image repository in registry/name form"
         fi
         case "$registry" in
           ""|-*|*[[:space:]@,]*)
-            fail_input "The publication phase requires exactly one untagged image repository in registry/name form"
+            skip_publication "the publication phase requires exactly one untagged image repository in registry/name form"
             ;;
         esac
         case "$repository_name" in
           ""|-*|*[[:space:]@,]*|*:*)
-            fail_input "The publication phase requires exactly one untagged image repository in registry/name form"
+            skip_publication "the publication phase requires exactly one untagged image repository in registry/name form"
             ;;
         esac
         if ! [[ "$registry" =~ ^[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]] ||
           ! [[ "$repository_name" =~ ^[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*$ ]]; then
-          fail_input "The publication phase image repository is malformed"
+          skip_publication "the publication phase image repository is malformed"
         fi
 
         if ! [[ "$ordered_tag" =~ ^r[0-9]{12}-[0-9a-f]{6}$ ]] ||
           ! [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
           ! [[ "$source_revision" =~ ^[0-9a-f]{6,}$ ]] ||
           [ "${ordered_tag##*-}" != "${source_revision:0:6}" ]; then
-          fail_input "The ordered tag, digest, and source revision must be present, valid, and revision-matched"
+          skip_publication "the ordered tag, digest, and source revision must be present, valid, and revision-matched"
         fi
 
         printf 'image=%s\n' "$repository" >> "$GITHUB_OUTPUT"
@@ -419,7 +446,10 @@ runs:
           exit 0
         fi
 
-        # Keep the 20s read-back and 35s publication bounds in sync with the publish-ordered-release-tag latency budget above.
+        client_output="$(mktemp -d "$RUNNER_TEMP/ordered-image-alias.XXXXXX")"
+        trap 'rm -rf "$client_output"' EXIT
+
+        # Keep the 20s read-back and 35s publication bounds, the two attempts and the 5s pause in sync with the publish-ordered-release-tag latency budget above.
         inspect_digest() {
           local reference="$1"
           local output
@@ -427,18 +457,23 @@ runs:
 
           output="$(timeout --kill-after=10s 20s \
             docker buildx imagetools inspect \
-            --format '{{json .Manifest.Digest}}' "$reference" 2>/dev/null)" || status=$?
+            --format '{{json .Manifest.Digest}}' "$reference" 2>"$client_output/read")" || status=$?
 
-          if [ "$status" -ne 0 ]; then
-            return "$status"
-          fi
-
-          if [[ "$output" =~ ^\"(sha256:[0-9a-f]{64})\"$ ]]; then
+          if [ "$status" -eq 0 ] && [[ "$output" =~ ^\"(sha256:[0-9a-f]{64})\"$ ]]; then
             printf '%s\n' "${BASH_REMATCH[1]}"
             return 0
           fi
 
-          return 65
+          mv "$client_output/read" "$client_output/failed-read"
+          if [ -n "$output" ]; then
+            printf 'Client output:\n%s\n' "$output" >> "$client_output/failed-read"
+          fi
+          if [ "$status" -eq 0 ]; then
+            printf 'output format failure, client exit status 0' > "$client_output/failed-read-status"
+            return 65
+          fi
+          printf 'exit status %s' "$status" > "$client_output/failed-read-status"
+          return "$status"
         }
 
         classify_alias() {
@@ -465,48 +500,153 @@ runs:
         expected_digest="$ORDERED_RELEASE_DIGEST"
         target_image="${repository}:${ordered_tag}"
         source_image="${repository}@${expected_digest}"
-        publication_status=0
-        candidate=""
-        observed=""
-        if observed="$(inspect_digest "$target_image")"; then
-          if [ "$observed" = "$expected_digest" ]; then
-            candidate=present-at-expected-digest
-          else
-            candidate=integrity-mismatch
+        write_status=""
+
+        # An attempt writes the alias only when its probe finds it absent, then reads it back.
+        for attempt in 1 2; do
+          if [ "$attempt" -gt 1 ]; then
+            sleep 5
           fi
-        elif ! inspect_digest "$source_image" >/dev/null && observed="$(inspect_digest "$target_image")"; then
-          if [ "$observed" = "$expected_digest" ]; then
-            candidate=present-at-expected-digest
-          else
-            candidate=integrity-mismatch
+          result="$(classify_alias "$target_image" "$source_image" "$expected_digest")" || result=unknown
+          if [ "$result" = absent ]; then
+            write_status=0
+            timeout --kill-after=10s 35s \
+              docker buildx imagetools create --prefer-index=false --tag "$target_image" "$source_image" >"$client_output/write" 2>&1 || write_status=$?
+            result="$(classify_alias "$target_image" "$source_image" "$expected_digest")" || result=unknown
           fi
-        fi
-        if [ -z "$candidate" ]; then
-          timeout --kill-after=10s 35s \
-            docker buildx imagetools create --prefer-index=false --tag "$target_image" "$source_image" >&2 || publication_status=$?
-          candidate="$(classify_alias "$target_image" "$source_image" "$expected_digest")" || candidate=unknown
+          printf 'Attempt %s ended %s\n' "$attempt" "$result"
+          case "$result" in
+            absent|unknown) ;;
+            *) break ;;
+          esac
+        done
+        printf 'result=%s\n' "$result" >> "$GITHUB_OUTPUT"
+        printf 'Ordered image alias result %s from attempt %s\n' "$result" "$attempt"
+
+        # Registry client output is untrusted: stop-commands with a random marker keeps it from issuing workflow commands.
+        if [ "$result" != present-at-expected-digest ]; then
+          marker="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            printf '::stop-commands::%s\n' "$marker"
+            printf 'Last failed registry read, %s:\n' "$(cat "$client_output/failed-read-status" 2>/dev/null || printf 'none')"
+            cat "$client_output/failed-read" 2>/dev/null || true
+            printf '\nLast alias write, exit status %s:\n' "${write_status:-none}"
+            cat "$client_output/write" 2>/dev/null || true
+            printf '\n::%s::\n' "$marker"
+          } >&2
         fi
 
-        case "$candidate" in
-          present-at-expected-digest)
-            if [ "$publication_status" -eq 0 ]; then
-              printf '%s\n' '::notice title=Ordered image alias present::Registry read-back confirmed the expected build digest' >&2
-            else
-              printf '::notice title=Ordered image alias present::Registry read-back confirmed the expected build digest after publication client status %s\n' "$publication_status" >&2
-            fi
-            ;;
-          absent)
-            printf '::warning title=Ordered image alias absent::Registry read-back confirmed absence after publication client status %s\n' "$publication_status" >&2
-            ;;
-          integrity-mismatch)
-            printf '%s\n' '::error title=Ordered image alias integrity mismatch::Registry read-back returned a different digest' >&2
-            ;;
-          unknown)
-            printf '%s\n' '::error title=Ordered image alias read-back unavailable::Registry read-back could not determine the ordered alias state' >&2
-            ;;
-          *)
-            candidate=unknown
-            printf '%s\n' '::error title=Ordered image alias read-back unavailable::Registry read-back could not determine the ordered alias state' >&2
-            ;;
-        esac
-        printf 'result=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
+    # The last step of the publish phase and the only one that fails it. It
+    # runs when validation ran and set image (valid inputs) or reason
+    # (publication skipped), so validation's condition is the publish gate.
+    # Its condition has no status function, so it does not run after an
+    # earlier step of this invocation failed or the job was cancelled.
+    - name: Check ordered release alias
+      id: ordered-release-check
+      if: steps.ordered-release-validation.outputs.image != '' || steps.ordered-release-validation.outputs.reason != ''
+      shell: bash
+      env:
+        ORDERED_RELEASE_RESULT: ${{ steps.ordered-release-publication.outputs.result }}
+        ORDERED_RELEASE_SKIP_REASON: ${{ steps.ordered-release-validation.outputs.reason }}
+        ORDERED_RELEASE_IMAGE: ${{ inputs.images }}
+        ORDERED_RELEASE_TAG: ${{ inputs.ordered-release-tag }}
+        ALERT_SLACK_BOT_TOKEN: ${{ inputs.alert-slack-bot-token }}
+        ALERT_SLACK_CHANNEL: ${{ inputs.alert-slack-channel }}
+      run: |
+        set -euo pipefail
+
+        # set +a and declare +x keep the copy unexported even when the job environment turns on allexport or exports this name.
+        set +a
+        declare +x alert_token="${ALERT_SLACK_BOT_TOKEN:-}"
+        unset ALERT_SLACK_BOT_TOKEN
+        if [ -n "$alert_token" ]; then
+          printf '%s\n' 'An alert token was supplied'
+        else
+          printf '%s\n' 'No alert token was supplied'
+        fi
+
+        no_freight="Kargo creates no Freight for this build, so deploys stay on the previous build"
+        uncertain="The alias could not be verified at the expected digest, so whether Kargo creates Freight for this build is uncertain"
+        rerun_job="Re-running the failed job retries"
+
+        if [ -n "${ORDERED_RELEASE_SKIP_REASON:-}" ]; then
+          status="$ORDERED_RELEASE_SKIP_REASON"
+          consequence="$no_freight"
+          retry="Re-run all jobs: the failed job alone reuses the build's empty value"
+        else
+          status="${ORDERED_RELEASE_RESULT:-unknown}"
+          case "$status" in
+            present-at-expected-digest)
+              printf '%s\n' '::notice title=Ordered image alias present::Registry read-back confirmed the expected build digest'
+              exit 0
+              ;;
+            absent)
+              consequence="$no_freight"
+              retry="$rerun_job"
+              ;;
+            integrity-mismatch)
+              consequence="$uncertain"
+              retry="A re-run cannot clear it"
+              ;;
+            *)
+              consequence="$uncertain"
+              retry="$rerun_job"
+              ;;
+          esac
+        fi
+
+        printf '::error title=Ordered image alias not confirmed::%s. %s. %s.\n' "$status" "$consequence" "$retry"
+
+        if [ -z "$alert_token" ]; then
+          exit 1
+        fi
+
+        alert_not_sent() {
+          printf '::warning title=Ordered image alias alert not sent::%s\n' "$1"
+          exit 1
+        }
+
+        body_status=0
+        body="$(ALERT_STATUS="$status" ALERT_CONSEQUENCE="$consequence" ALERT_RETRY="$retry" jq -n '
+          def none_if_empty: if . == "" then "none" else . end;
+          def slack_escape: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+          {
+            channel: env.ALERT_SLACK_CHANNEL,
+            unfurl_links: false,
+            unfurl_media: false,
+            text: ([
+              "Ordered image alias not confirmed in \(env.GITHUB_REPOSITORY)",
+              "Image repository: \(env.ORDERED_RELEASE_IMAGE | none_if_empty | slack_escape)",
+              "Ordered tag: \(env.ORDERED_RELEASE_TAG | none_if_empty | slack_escape)",
+              "Result: \(env.ALERT_STATUS)",
+              "Commit: \(env.GITHUB_SHA[0:7])",
+              "Run: \(env.GITHUB_SERVER_URL)/\(env.GITHUB_REPOSITORY)/actions/runs/\(env.GITHUB_RUN_ID)",
+              "\(env.ALERT_CONSEQUENCE). \(env.ALERT_RETRY)."
+            ] | join("\n"))
+          }')" || body_status=$?
+        if [ "$body_status" -ne 0 ]; then
+          alert_not_sent "The alert body could not be built, jq exit status $body_status"
+        fi
+
+        # The token reaches curl as a header file on a pipe, never as an argument or an environment variable.
+        # -q, which curl honours only as the first argument, keeps a .curlrc from changing the request.
+        post_status=0
+        reply="$(printf '%s' "$body" | curl -q --silent --show-error --max-time 10 \
+          --header 'Content-Type: application/json; charset=utf-8' \
+          --header @<(printf 'Authorization: Bearer %s\n' "$alert_token") \
+          --data-binary @- \
+          https://slack.com/api/chat.postMessage)" || post_status=$?
+
+        if [ "$post_status" -ne 0 ]; then
+          alert_not_sent "The Slack request failed with curl exit status $post_status"
+        fi
+        # Sent only when the reply is exactly one JSON object whose ok is the boolean true.
+        if jq -n -e '[inputs] | length == 1 and (.[0] | type == "object" and .ok == true)' <<<"$reply" >/dev/null 2>&1; then
+          printf '%s\n' 'Alert sent to Slack'
+          exit 1
+        fi
+        slack_error="$(jq -r '.error // empty' <<<"$reply" 2>/dev/null)" || slack_error=""
+        if ! [[ "$slack_error" =~ ^[a-z0-9_]+$ ]]; then
+          slack_error="no recognizable error code"
+        fi
+        alert_not_sent "Slack did not accept the alert: $slack_error"
