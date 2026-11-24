@@ -89,7 +89,7 @@ None of these changes the outcome: the step still fails for the alias. Without a
 
 ### Time budget
 
-The figures below are totals of the timed operations, not a limit on the phase. The action has no phase timer, and other commands add a little. The alias job needs no `timeout-minutes`, because the action bounds its own work. A caller that does limit the job sets the limit above the two budgets together, 905 seconds (440 + 465), because a job that is ended early never reaches the step that alerts.
+The figures below are totals of the timed operations, not a limit on the phase. The action has no phase timer, and other commands add a little. The alias job sets `timeout-minutes` to at least twice the two budgets together, which is 30 minutes for today's 905 seconds (440 + 465). A limit below the budgets can end the job before the step that alerts. With no limit, a job that hangs in the checkout or the registry login holds its runner for GitHub's six-hour default, and in a workflow whose runs share one concurrency group it holds the next build as well.
 
 - Generate phase: the history fetches total at most 440 seconds, 120 seconds for the treeless fetch and 300 for the full fetch that follows when it fails, each with a 10-second kill grace (130 + 310).
 - Publish phase: the registry operations and the alert total at most 465 seconds. An attempt makes up to six 20-second registry reads and one 35-second write, each with a 10-second kill grace (6 × 30 + 45 = 225 seconds). Two attempts, the 5-second pause between them and the alert's 10 seconds make 2 × 225 + 5 + 10.
@@ -101,8 +101,8 @@ The figures below are totals of the timed operations, not a limit on the phase. 
 - In every calling repository that publishes the alias, the publish phase runs in a job of its own, after the build. That job checks out the commit, logs in to the registry, calls the action to generate the ordered tag and calls it again to publish and check the alias. Only the digest crosses from the build job, as a job output. The image repository is named in the alias job itself. Re-running that job alone retries generation and publication and builds nothing. The reason is the registry: a re-run that builds the image again pushes another digest, and a registry that keeps its tags immutable refuses to push a tag that already exists, so the job that can be re-run must build nothing. That re-run can recover from a transient failure to generate the tag, publish the alias or verify it.
 - The two calls stay two. The action's phases are separate invocations, and an empty tag passed to the publish phase keeps its meaning, `tag-unavailable`.
 - The build job calls the action once for `tags`, `labels` and `annotations` and does not ask for the ordered tag: the action adds it to no metadata tag and writes it into no annotation.
-- Where other jobs depend on the build, nothing depends on the alias job and it is marked `continue-on-error: true` at job level. The job shows failed, the run does not fail, and the other jobs run. A step-level `continue-on-error` reports the step as succeeded and hides the failure, so it is not the way. Where no other job depends on the build, as in the example below, the alias job is not marked and a missing alias fails the run.
-- The checkout may be shallow: the action fetches the history the tag needs. The alias job sets no time limit of its own, as [Time budget](#time-budget) explains.
+- Where other jobs depend on the build, nothing depends on the alias job and it is marked `continue-on-error: true` at job level. The job shows failed and the run does not fail. The other jobs run either way, because they depend on the build and not on the alias job. A step-level `continue-on-error` reports the step as succeeded and hides the failure, so it is not the way. Where no other job depends on the build, as in the example below, the alias job is not marked and a missing alias fails the run.
+- The checkout may be shallow: the action fetches the history the tag needs. The alias job sets a generous time limit, as [Time budget](#time-budget) explains.
 
 ```yaml
 env:
@@ -135,6 +135,7 @@ jobs:
   ordered-release-alias:
     runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 30
     permissions:
       contents: read
       # Add what your registry login needs, for example id-token: write or packages: write.
