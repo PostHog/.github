@@ -76,7 +76,7 @@ A cancellation keeps a last step that has not started from starting, whatever th
 
 ### Alert
 
-When the last step is about to fail and `alert-slack-bot-token` is set, the action attempts one post with Slack's `chat.postMessage` to `alert-slack-channel` (default `C0B11J29GP9`). The bot must be a member of that channel. The message names the repository, the image repository, the ordered tag or `none`, the result or validation reason, the short commit and the run link, followed by the two sentences in the table above.
+When the last step is about to fail and `alert-slack-bot-token` is set, the action attempts one post with Slack's `chat.postMessage` to `alert-slack-channel` (default `C0B11J29GP9`). The bot must be a member of that channel. The message names the repository, the image repository, the ordered tag or `none`, the result or validation reason, the short commit and the run link, followed by the two sentences in the table above. The image repository and ordered tag the caller supplied are shown as text: `&`, `<` and `>` in them are escaped, so they cannot form Slack markup such as a mention or a labelled link.
 
 An attempted post is not always an accepted one. The log says `Alert sent to Slack` only when Slack's reply is exactly one JSON object whose `ok` is the boolean `true`. Otherwise the step writes the warning `Ordered image alias alert not sent`, in these cases:
 - the message could not be built;

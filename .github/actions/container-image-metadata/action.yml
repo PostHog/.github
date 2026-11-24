@@ -609,14 +609,15 @@ runs:
         body_status=0
         body="$(ALERT_STATUS="$status" ALERT_CONSEQUENCE="$consequence" ALERT_RETRY="$retry" jq -n '
           def none_if_empty: if . == "" then "none" else . end;
+          def slack_escape: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
           {
             channel: env.ALERT_SLACK_CHANNEL,
             unfurl_links: false,
             unfurl_media: false,
             text: ([
               "Ordered image alias not confirmed in \(env.GITHUB_REPOSITORY)",
-              "Image repository: \(env.ORDERED_RELEASE_IMAGE | none_if_empty)",
-              "Ordered tag: \(env.ORDERED_RELEASE_TAG | none_if_empty)",
+              "Image repository: \(env.ORDERED_RELEASE_IMAGE | none_if_empty | slack_escape)",
+              "Ordered tag: \(env.ORDERED_RELEASE_TAG | none_if_empty | slack_escape)",
               "Result: \(env.ALERT_STATUS)",
               "Commit: \(env.GITHUB_SHA[0:7])",
               "Run: \(env.GITHUB_SERVER_URL)/\(env.GITHUB_REPOSITORY)/actions/runs/\(env.GITHUB_RUN_ID)",
