@@ -89,7 +89,7 @@ None of these changes the outcome: the step still fails for the alias. Without a
 
 ### Time budget
 
-The figures below are totals of the timed operations, not a limit on the phase. The action has no phase timer, and other commands add a little. The alias job sets `timeout-minutes` to at least twice the two budgets together, which is 30 minutes for today's 905 seconds (440 + 465). A limit below the budgets can end the job before the step that alerts. With no limit, a job that hangs in the checkout or the registry login holds its runner for GitHub's six-hour default, and in a workflow whose runs share one concurrency group it holds the next build as well.
+The figures below are totals of the timed operations, not a limit on the phase. The action has no phase timer, and other commands add a little. The alias job sets `timeout-minutes` to about twice the two budgets together, which is 30 minutes for today's 905 seconds (440 + 465). A limit below the budgets can end the job before the step that alerts. With no limit, a job that hangs in the checkout or the registry login holds its runner for GitHub's six-hour default, and where a concurrency group queues the next run behind it, it delays the next build as well.
 
 - Generate phase: the history fetches total at most 440 seconds, 120 seconds for the treeless fetch and 300 for the full fetch that follows when it fails, each with a 10-second kill grace (130 + 310).
 - Publish phase: the registry operations and the alert total at most 465 seconds. An attempt makes up to six 20-second registry reads and one 35-second write, each with a 10-second kill grace (6 × 30 + 45 = 225 seconds). Two attempts, the 5-second pause between them and the alert's 10 seconds make 2 × 225 + 5 + 10.
