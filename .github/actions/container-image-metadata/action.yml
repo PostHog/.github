@@ -65,7 +65,8 @@ inputs:
       and produce no ordered-release annotation; active publication retains
       its result annotations. The bounded operations of both invocations
       total at most 905 seconds; these are sums of the timed operations, not a
-      limit on either phase, so set each job's timeout-minutes above them.
+      limit on either phase, so a job that sets timeout-minutes sets it above
+      the phases it runs.
       Generation's bounded fetches total at most 440 seconds: 120 seconds for
       the treeless history fetch and 300 seconds for the full fetch that
       follows when it fails. Publication's bounded operations total at most
@@ -77,7 +78,7 @@ inputs:
   ordered-release-tag:
     required: false
     description: >-
-      Source-ordered release tag returned by the pre-build invocation.
+      Source-ordered release tag returned by the generate invocation.
     default: ""
   ordered-release-digest:
     required: false
@@ -572,7 +573,7 @@ runs:
         if [ -n "${ORDERED_RELEASE_SKIP_REASON:-}" ]; then
           status="$ORDERED_RELEASE_SKIP_REASON"
           consequence="$no_freight"
-          retry="Re-run all jobs: the failed job alone reuses the build's empty value"
+          retry="$rerun_job"
         else
           status="${ORDERED_RELEASE_RESULT:-unknown}"
           case "$status" in
