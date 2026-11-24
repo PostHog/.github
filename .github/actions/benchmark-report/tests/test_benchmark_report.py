@@ -422,7 +422,12 @@ def test_action_pins_toolchain_and_passes_inputs_as_data():
     action = yaml.safe_load((Path(__file__).resolve().parents[1] / "action.yml").read_text())
     setup, report = action["runs"]["steps"]
     assert len(setup["uses"].split("@")[1]) == 40
-    assert setup["with"] == {"version": "0.13.4", "python-version": "3.12.12", "enable-cache": "false"}
+    assert setup["with"] == {
+        "version": "0.13.4",
+        "python-version": "3.12.12",
+        "enable-cache": "false",
+        "ignore-empty-workdir": "true",
+    }
     assert "${{" not in report["run"]
     assert "--frozen --no-dev --no-install-project" in report["run"]
     assert action["inputs"]["mode"]["default"] == "render"

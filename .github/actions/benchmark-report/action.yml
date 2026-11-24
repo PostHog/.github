@@ -52,6 +52,7 @@ runs:
         version: '0.13.4'
         python-version: '3.12.12'
         enable-cache: 'false'
+        ignore-empty-workdir: 'true'
     - id: report
       shell: bash
       env:
